@@ -4,10 +4,8 @@
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
 <title>ProcureIQ — Tool Evaluation</title>
-<!-- Firebase SDK (compat version - works everywhere) -->
-<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
-<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
-<!-- React -->
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
 <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
 <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
 <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
@@ -16,23 +14,21 @@
   *{box-sizing:border-box;margin:0;padding:0;}
   html,body,#root{height:100%;width:100%;}
   body{background:#0F1117;color:#E8EAF0;font-family:'DM Sans','Segoe UI',sans-serif;}
-  ::-webkit-scrollbar{width:6px;}
-  ::-webkit-scrollbar-track{background:#1A1D27;}
-  ::-webkit-scrollbar-thumb{background:#2E3347;border-radius:3px;}
+  ::-webkit-scrollbar{width:6px;}::-webkit-scrollbar-track{background:#1A1D27;}::-webkit-scrollbar-thumb{background:#2E3347;border-radius:3px;}
 </style>
 <script>
-  // Firebase config — already filled in with your project details
   const firebaseConfig = {
-    apiKey: "AIzaSyCxD6UazPH6UvD1MBj5YZdOmbdUEruHnYM",
-    authDomain: "procureiq-2f048.firebaseapp.com",
-    projectId: "procureiq-2f048",
-    storageBucket: "procureiq-2f048.firebasestorage.app",
-    messagingSenderId: "967187352633",
-    appId: "1:967187352633:web:0543f6b6ee8218ef0711e8"
+    apiKey: "AIzaSyBzZoxoMrQL3GaeneRtGewT9es-PGgEl70",
+    authDomain: "procureiq-7201b.firebaseapp.com",
+    projectId: "procureiq-7201b",
+    storageBucket: "procureiq-7201b.firebasestorage.app",
+    messagingSenderId: "347584685186",
+    appId: "1:347584685186:web:4d576fccf205597f49c09b"
   };
   firebase.initializeApp(firebaseConfig);
   const db = firebase.firestore();
-  console.log("Firebase initialized successfully:", firebaseConfig.projectId);
+  db.settings({ experimentalForceLongPolling: true, merge: true });
+  console.log("✅ Firebase ready:", firebaseConfig.projectId);
 </script>
 </head>
 <body>
@@ -51,10 +47,8 @@ const CATEGORIES = ["Productivity","Security","Analytics","Communication","DevOp
 
 function formatDate(val) {
   if (!val) return "—";
-  try {
-    const d = val?.toDate ? val.toDate() : new Date(val);
-    return d.toLocaleDateString("en-US",{month:"short",day:"numeric",year:"numeric",hour:"2-digit",minute:"2-digit"});
-  } catch { return "—"; }
+  try { const d = val?.toDate ? val.toDate() : new Date(val); return d.toLocaleDateString("en-US",{month:"short",day:"numeric",year:"numeric",hour:"2-digit",minute:"2-digit"}); }
+  catch { return "—"; }
 }
 
 const initialForm = {
@@ -69,7 +63,6 @@ const css = `
   input,textarea,select{font-family:'DM Sans','Segoe UI',sans-serif;}
   .btn{cursor:pointer;border:none;border-radius:8px;font-family:inherit;font-weight:500;transition:all 0.15s;}
   .btn:hover{filter:brightness(1.1);transform:translateY(-1px);}
-  .btn:active{transform:translateY(0);}
   .card{background:#161922;border:1px solid #252836;border-radius:12px;}
   .inp{background:#1A1D27;border:1px solid #2E3347;border-radius:8px;padding:10px 14px;color:#E8EAF0;width:100%;font-size:14px;outline:none;transition:border-color 0.15s;}
   .inp:focus{border-color:#6366F1;}
@@ -88,7 +81,7 @@ const css = `
   .alt-card{background:#1A1D27;border:1px solid #252836;border-radius:10px;padding:16px;margin-bottom:10px;}
   .audit-item{display:flex;gap:12px;padding:12px 0;border-bottom:1px solid #1E2130;}
   .audit-dot{width:8px;height:8px;border-radius:50%;margin-top:5px;flex-shrink:0;}
-  .toast{position:fixed;bottom:28px;right:28px;padding:14px 20px;border-radius:10px;font-size:14px;font-weight:500;z-index:9999;display:flex;align-items:center;gap:8px;box-shadow:0 8px 32px rgba(0,0,0,0.4);animation:slideIn 0.2s ease;max-width:400px;}
+  .toast{position:fixed;bottom:28px;right:28px;padding:14px 20px;border-radius:10px;font-size:14px;font-weight:500;z-index:9999;display:flex;align-items:center;gap:8px;box-shadow:0 8px 32px rgba(0,0,0,0.4);animation:slideIn 0.2s ease;max-width:420px;}
   @keyframes slideIn{from{transform:translateY(20px);opacity:0;}to{transform:translateY(0);opacity:1;}}
   .urg-btn{padding:8px 16px;border-radius:8px;border:1px solid #2E3347;cursor:pointer;font-size:13px;font-weight:500;transition:all 0.15s;background:transparent;color:#8B8FA8;}
   .spinner{width:16px;height:16px;border:2px solid #ffffff40;border-top-color:#fff;border-radius:50%;animation:spin 0.7s linear infinite;display:inline-block;}
@@ -112,115 +105,68 @@ function App() {
   const [saving, setSaving]           = useState(false);
   const toastTimer = useRef(null);
 
-  // Real-time listener from Firestore
   useEffect(() => {
-    console.log("Setting up Firestore listener...");
     const unsub = db.collection("procurements")
       .orderBy("submittedAt", "desc")
       .onSnapshot(
-        (snap) => {
-          console.log("Got", snap.docs.length, "documents");
-          setSubmissions(snap.docs.map(d => ({ id: d.id, ...d.data() })));
-          setLoading(false);
-        },
-        (err) => {
-          console.error("Firestore error:", err);
-          showToast("Database error: " + err.message, "error");
-          setLoading(false);
-        }
+        snap => { setSubmissions(snap.docs.map(d=>({id:d.id,...d.data()}))); setLoading(false); },
+        err  => { console.error("Firestore:", err); showToast("DB Error: "+err.message,"error"); setLoading(false); }
       );
     return () => unsub();
   }, []);
 
   const showToast = (msg, type="success") => {
-    setToast({msg, type});
+    setToast({msg,type});
     clearTimeout(toastTimer.current);
-    toastTimer.current = setTimeout(() => setToast(null), 4000);
+    toastTimer.current = setTimeout(()=>setToast(null),4000);
   };
 
   const submitForm = async () => {
-    if (!form.submitterName || !form.toolName || !form.annualCost) {
-      showToast("Please fill in Name, Tool Name and Annual Cost.", "error");
-      return;
-    }
+    if (!form.submitterName||!form.toolName||!form.annualCost){showToast("Fill in Name, Tool Name and Cost.","error");return;}
     setSaving(true);
     try {
-      const entry = {
-        ...form,
-        status: "pending",
+      await db.collection("procurements").add({
+        ...form, status:"pending",
         submittedAt: firebase.firestore.FieldValue.serverTimestamp(),
-        auditLog: [{ action:"Submitted", by:form.submitterName, at:new Date().toISOString(), note:"" }],
-      };
-      const ref = await db.collection("procurements").add(entry);
-      console.log("Saved with ID:", ref.id);
-      setForm(initialForm);
-      setView("dashboard");
+        auditLog:[{action:"Submitted",by:form.submitterName,at:new Date().toISOString(),note:""}],
+      });
+      setForm(initialForm); setView("dashboard");
       showToast("Request submitted successfully!");
-    } catch(e) {
-      console.error("Save error:", e);
-      showToast("Save failed: " + e.message, "error");
-    }
+    } catch(e) { showToast("Error: "+e.message,"error"); }
     setSaving(false);
   };
 
-  const updateStatus = async (id, status, note="") => {
+  const updateStatus = async (id,status,note="") => {
     try {
-      const s = submissions.find(x => x.id === id);
-      const newLog = [...(s.auditLog||[]), {
-        action: status==="approved" ? "Approved" : status==="rejected" ? "Rejected" : "Moved to Under Review",
-        by: "Procurement Team", at: new Date().toISOString(), note
-      }];
+      const s = submissions.find(x=>x.id===id);
       await db.collection("procurements").doc(id).update({
         status,
-        auditLog: newLog,
+        auditLog:[...(s.auditLog||[]),{action:status==="approved"?"Approved":status==="rejected"?"Rejected":"Moved to Under Review",by:"Procurement Team",at:new Date().toISOString(),note}],
         updatedAt: firebase.firestore.FieldValue.serverTimestamp()
       });
       setApprovalNote("");
-      showToast(status==="approved" ? "Request approved ✓" : status==="rejected" ? "Request rejected" : "Moved to review.");
-    } catch(e) {
-      showToast("Update failed: " + e.message, "error");
-    }
+      showToast(status==="approved"?"Approved ✓":status==="rejected"?"Rejected":"Updated.");
+    } catch(e){showToast("Error: "+e.message,"error");}
   };
 
-  const detail = submissions.find(s => s.id === detailId);
-
+  const detail = submissions.find(s=>s.id===detailId);
   const filtered = submissions
-    .filter(s => filterStatus==="all" || s.status===filterStatus)
-    .filter(s => !searchQuery ||
-      s.toolName?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      s.submitterName?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      s.id?.toLowerCase().includes(searchQuery.toLowerCase()))
-    .sort((a,b) => {
-      if (sortBy==="cost") return parseFloat(b.annualCost||0) - parseFloat(a.annualCost||0);
-      if (sortBy==="tool") return (a.toolName||"").localeCompare(b.toolName||"");
-      return 0;
-    });
-
-  const compareList = submissions.filter(s => selectedIds.includes(s.id));
-
-  const stats = {
-    total: submissions.length,
-    pending: submissions.filter(s=>s.status==="pending").length,
-    approved: submissions.filter(s=>s.status==="approved").length,
-    rejected: submissions.filter(s=>s.status==="rejected").length,
-    totalCost: submissions.filter(s=>s.status==="approved").reduce((sum,s)=>sum+(parseFloat(s.annualCost)||0),0),
-  };
-
-  const nav = (v) => { setView(v); setDetailId(null); };
+    .filter(s=>filterStatus==="all"||s.status===filterStatus)
+    .filter(s=>!searchQuery||s.toolName?.toLowerCase().includes(searchQuery.toLowerCase())||s.submitterName?.toLowerCase().includes(searchQuery.toLowerCase()))
+    .sort((a,b)=>sortBy==="cost"?parseFloat(b.annualCost||0)-parseFloat(a.annualCost||0):sortBy==="tool"?(a.toolName||"").localeCompare(b.toolName||""):0);
+  const compareList = submissions.filter(s=>selectedIds.includes(s.id));
+  const stats={total:submissions.length,pending:submissions.filter(s=>s.status==="pending").length,approved:submissions.filter(s=>s.status==="approved").length,rejected:submissions.filter(s=>s.status==="rejected").length,totalCost:submissions.filter(s=>s.status==="approved").reduce((sum,s)=>sum+(parseFloat(s.annualCost)||0),0)};
+  const nav=v=>{setView(v);setDetailId(null);};
 
   return (
     <div style={{fontFamily:"'DM Sans','Segoe UI',sans-serif",background:"#0F1117",minHeight:"100vh",color:"#E8EAF0",display:"flex",height:"100vh",overflow:"hidden"}}>
       <style>{css}</style>
-
       {/* Sidebar */}
       <div style={{width:220,background:"#0D0F18",borderRight:"1px solid #1E2130",display:"flex",flexDirection:"column",padding:"20px 10px",flexShrink:0}}>
         <div style={{padding:"0 8px 20px",borderBottom:"1px solid #1E2130"}}>
           <div style={{display:"flex",alignItems:"center",gap:10}}>
             <div style={{width:32,height:32,background:"linear-gradient(135deg,#6366F1,#8B5CF6)",borderRadius:8,display:"flex",alignItems:"center",justifyContent:"center",fontSize:16}}>⚙</div>
-            <div>
-              <div style={{fontSize:14,fontWeight:600,color:"#E8EAF0"}}>ProcureIQ</div>
-              <div style={{fontSize:11,color:"#4B5268",display:"flex",alignItems:"center",gap:5}}><span className="live-dot"/> Firebase Live</div>
-            </div>
+            <div><div style={{fontSize:14,fontWeight:600,color:"#E8EAF0"}}>ProcureIQ</div><div style={{fontSize:11,color:"#4B5268",display:"flex",alignItems:"center",gap:5}}><span className="live-dot"/> Firebase Live</div></div>
           </div>
         </div>
         <nav style={{flex:1,marginTop:14,display:"flex",flexDirection:"column",gap:2}}>
@@ -237,102 +183,62 @@ function App() {
         </div>
       </div>
 
-      {/* Main Content */}
+      {/* Main */}
       <div style={{flex:1,overflow:"auto",padding:"28px 32px"}}>
 
         {/* DASHBOARD */}
         {view==="dashboard"&&!detailId&&(
           <div>
-            <div style={{marginBottom:24}}>
-              <h1 style={{fontSize:24,fontWeight:600,color:"#F0F2FA"}}>Procurement Dashboard</h1>
-              <p style={{fontSize:13,color:"#6B7094",marginTop:3}}>All submissions stored permanently in Firebase</p>
-            </div>
+            <div style={{marginBottom:24}}><h1 style={{fontSize:24,fontWeight:600,color:"#F0F2FA"}}>Procurement Dashboard</h1><p style={{fontSize:13,color:"#6B7094",marginTop:3}}>All data stored permanently in Firebase</p></div>
             <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:14,marginBottom:24}}>
               {[["Total",stats.total,"#6366F1","📁"],["Pending",stats.pending,"#F59E0B","⏳"],["Approved",stats.approved,"#10B981","✓"],["Rejected",stats.rejected,"#EF4444","✕"]].map(([label,value,color,icon])=>(
-                <div key={label} className="card" style={{padding:"18px 20px"}}>
-                  <div style={{fontSize:20,marginBottom:6}}>{icon}</div>
-                  <div style={{fontSize:26,fontWeight:600,color}}>{value}</div>
-                  <div style={{fontSize:12,color:"#6B7094",marginTop:2}}>{label}</div>
-                </div>
+                <div key={label} className="card" style={{padding:"18px 20px"}}><div style={{fontSize:20,marginBottom:6}}>{icon}</div><div style={{fontSize:26,fontWeight:600,color}}>{value}</div><div style={{fontSize:12,color:"#6B7094",marginTop:2}}>{label}</div></div>
               ))}
             </div>
             <div className="card" style={{overflow:"hidden"}}>
               <div style={{padding:"16px 20px",borderBottom:"1px solid #1E2130",display:"flex",alignItems:"center",gap:10,flexWrap:"wrap"}}>
                 <input className="inp" style={{width:200}} placeholder="Search…" value={searchQuery} onChange={e=>setSearchQuery(e.target.value)}/>
                 <div style={{display:"flex",gap:5,flexWrap:"wrap"}}>
-                  {["all","pending","under-review","approved","rejected"].map(s=>(
-                    <div key={s} className={`tab${filterStatus===s?" active":""}`} onClick={()=>setFilterStatus(s)}>
-                      {s==="all"?"All":STATUS_CONFIG[s]?.label}
-                    </div>
-                  ))}
+                  {["all","pending","under-review","approved","rejected"].map(s=><div key={s} className={`tab${filterStatus===s?" active":""}`} onClick={()=>setFilterStatus(s)}>{s==="all"?"All":STATUS_CONFIG[s]?.label}</div>)}
                 </div>
-                <div style={{marginLeft:"auto"}}>
-                  <select className="inp" style={{width:120}} value={sortBy} onChange={e=>setSortBy(e.target.value)}>
-                    <option value="date">Latest</option>
-                    <option value="cost">Cost</option>
-                    <option value="tool">Name</option>
-                  </select>
-                </div>
+                <div style={{marginLeft:"auto"}}><select className="inp" style={{width:120}} value={sortBy} onChange={e=>setSortBy(e.target.value)}><option value="date">Latest</option><option value="cost">Cost</option><option value="tool">Name</option></select></div>
               </div>
-              {loading ? (
-                <div style={{padding:60,textAlign:"center",color:"#4B5268"}}>
-                  <div style={{fontSize:32,marginBottom:12}}>⏳</div>
-                  <div>Connecting to Firebase…</div>
-                </div>
-              ) : filtered.length===0 ? (
-                <div style={{padding:60,textAlign:"center",color:"#4B5268"}}>
-                  <div style={{fontSize:36,marginBottom:12}}>📭</div>
-                  <div style={{fontSize:14}}>No requests yet. <span style={{color:"#6366F1",cursor:"pointer"}} onClick={()=>setView("submit")}>Submit the first one →</span></div>
-                </div>
-              ) : (
+              {loading?(<div style={{padding:60,textAlign:"center",color:"#4B5268"}}><div style={{fontSize:32,marginBottom:12}}>⏳</div><div>Connecting to Firebase…</div></div>)
+              :filtered.length===0?(<div style={{padding:60,textAlign:"center",color:"#4B5268"}}><div style={{fontSize:36,marginBottom:12}}>📭</div><div style={{fontSize:14}}>No requests yet. <span style={{color:"#6366F1",cursor:"pointer"}} onClick={()=>setView("submit")}>Submit the first one →</span></div></div>)
+              :(
                 <table style={{width:"100%",borderCollapse:"collapse"}}>
-                  <thead>
-                    <tr style={{background:"#0F1117"}}>
-                      {["","ID","Tool","Dept","Annual Cost","Alts","Submitted","Status","Actions"].map((h,i)=>(
-                        <th key={i} style={{padding:"11px 14px",fontSize:10,fontWeight:600,color:"#4B5268",textAlign:"left",textTransform:"uppercase",letterSpacing:"0.07em",whiteSpace:"nowrap"}}>{h}</th>
-                      ))}
-                    </tr>
-                  </thead>
+                  <thead><tr style={{background:"#0F1117"}}>{["","ID","Tool","Dept","Cost","Alts","Submitted","Status",""].map((h,i)=><th key={i} style={{padding:"11px 14px",fontSize:10,fontWeight:600,color:"#4B5268",textAlign:"left",textTransform:"uppercase",letterSpacing:"0.07em",whiteSpace:"nowrap"}}>{h}</th>)}</tr></thead>
                   <tbody>
                     {filtered.map(s=>{
-                      const sc = STATUS_CONFIG[s.status]||STATUS_CONFIG.pending;
-                      return (
-                        <tr key={s.id} className="row-hover" style={{borderTop:"1px solid #1A1D27"}} onClick={()=>setDetailId(s.id)}>
-                          <td style={{padding:"11px 8px 11px 14px"}}><input type="checkbox" checked={selectedIds.includes(s.id)} onChange={e=>{e.stopPropagation();setSelectedIds(prev=>prev.includes(s.id)?prev.filter(x=>x!==s.id):[...prev,s.id]);}} onClick={e=>e.stopPropagation()}/></td>
-                          <td style={{padding:"11px 14px",fontFamily:"monospace",fontSize:11,color:"#6366F1"}}>{s.id.slice(0,10)}…</td>
-                          <td style={{padding:"11px 14px"}}><div style={{fontWeight:500,fontSize:13}}>{s.toolName}</div><div style={{fontSize:11,color:"#6B7094"}}>{s.toolVendor}</div></td>
-                          <td style={{padding:"11px 14px",fontSize:12,color:"#9CA3C0"}}>{s.department}</td>
-                          <td style={{padding:"11px 14px",fontFamily:"monospace",fontSize:12,fontWeight:500}}>${parseFloat(s.annualCost||0).toLocaleString()}</td>
-                          <td style={{padding:"11px 14px",fontSize:12,color:"#6B7094",textAlign:"center"}}>{s.alternatives?.filter(a=>a.name).length||0}</td>
-                          <td style={{padding:"11px 14px",fontSize:11,color:"#6B7094",whiteSpace:"nowrap"}}>{formatDate(s.submittedAt)}</td>
-                          <td style={{padding:"11px 14px"}}><span className="badge" style={{background:sc.bg,color:sc.color}}><span style={{width:6,height:6,borderRadius:"50%",background:sc.dot}}/>{sc.label}</span></td>
-                          <td style={{padding:"11px 14px"}} onClick={e=>e.stopPropagation()}>
-                            <div style={{display:"flex",gap:5}}>
-                              {s.status==="pending"&&<button className="btn" style={{background:"#1E2B3A",color:"#6366F1",padding:"4px 10px",fontSize:11}} onClick={()=>updateStatus(s.id,"under-review")}>Review</button>}
-                              {s.status==="under-review"&&<>
-                                <button className="btn" style={{background:"#1E3A2F",color:"#10B981",padding:"4px 10px",fontSize:11}} onClick={()=>updateStatus(s.id,"approved")}>✓</button>
-                                <button className="btn" style={{background:"#3A1E1E",color:"#EF4444",padding:"4px 10px",fontSize:11}} onClick={()=>updateStatus(s.id,"rejected")}>✕</button>
-                              </>}
-                            </div>
-                          </td>
-                        </tr>
-                      );
+                      const sc=STATUS_CONFIG[s.status]||STATUS_CONFIG.pending;
+                      return(<tr key={s.id} className="row-hover" style={{borderTop:"1px solid #1A1D27"}} onClick={()=>setDetailId(s.id)}>
+                        <td style={{padding:"11px 8px 11px 14px"}}><input type="checkbox" checked={selectedIds.includes(s.id)} onChange={e=>{e.stopPropagation();setSelectedIds(prev=>prev.includes(s.id)?prev.filter(x=>x!==s.id):[...prev,s.id]);}} onClick={e=>e.stopPropagation()}/></td>
+                        <td style={{padding:"11px 14px",fontFamily:"monospace",fontSize:11,color:"#6366F1"}}>{s.id.slice(0,8)}…</td>
+                        <td style={{padding:"11px 14px"}}><div style={{fontWeight:500,fontSize:13}}>{s.toolName}</div><div style={{fontSize:11,color:"#6B7094"}}>{s.toolVendor}</div></td>
+                        <td style={{padding:"11px 14px",fontSize:12,color:"#9CA3C0"}}>{s.department}</td>
+                        <td style={{padding:"11px 14px",fontFamily:"monospace",fontSize:12,fontWeight:500}}>${parseFloat(s.annualCost||0).toLocaleString()}</td>
+                        <td style={{padding:"11px 14px",fontSize:12,color:"#6B7094",textAlign:"center"}}>{s.alternatives?.filter(a=>a.name).length||0}</td>
+                        <td style={{padding:"11px 14px",fontSize:11,color:"#6B7094",whiteSpace:"nowrap"}}>{formatDate(s.submittedAt)}</td>
+                        <td style={{padding:"11px 14px"}}><span className="badge" style={{background:sc.bg,color:sc.color}}><span style={{width:6,height:6,borderRadius:"50%",background:sc.dot}}/>{sc.label}</span></td>
+                        <td style={{padding:"11px 14px"}} onClick={e=>e.stopPropagation()}><div style={{display:"flex",gap:5}}>
+                          {s.status==="pending"&&<button className="btn" style={{background:"#1E2B3A",color:"#6366F1",padding:"4px 10px",fontSize:11}} onClick={()=>updateStatus(s.id,"under-review")}>Review</button>}
+                          {s.status==="under-review"&&<><button className="btn" style={{background:"#1E3A2F",color:"#10B981",padding:"4px 10px",fontSize:11}} onClick={()=>updateStatus(s.id,"approved")}>✓</button><button className="btn" style={{background:"#3A1E1E",color:"#EF4444",padding:"4px 10px",fontSize:11}} onClick={()=>updateStatus(s.id,"rejected")}>✕</button></>}
+                        </div></td>
+                      </tr>);
                     })}
                   </tbody>
                 </table>
               )}
             </div>
-            {selectedIds.length>=2&&(
-              <div style={{marginTop:14,padding:"12px 18px",background:"#1E2130",borderRadius:10,display:"flex",alignItems:"center",gap:10}}>
-                <span style={{fontSize:13,color:"#9CA3C0"}}>{selectedIds.length} selected</span>
-                <button className="btn" style={{background:"#6366F1",color:"white",padding:"7px 16px",fontSize:13}} onClick={()=>setView("compare")}>⚖ Compare</button>
-                <button className="btn" style={{background:"#1A1D27",color:"#6B7094",padding:"7px 12px",fontSize:13}} onClick={()=>setSelectedIds([])}>Clear</button>
-              </div>
-            )}
+            {selectedIds.length>=2&&(<div style={{marginTop:14,padding:"12px 18px",background:"#1E2130",borderRadius:10,display:"flex",alignItems:"center",gap:10}}>
+              <span style={{fontSize:13,color:"#9CA3C0"}}>{selectedIds.length} selected</span>
+              <button className="btn" style={{background:"#6366F1",color:"white",padding:"7px 16px",fontSize:13}} onClick={()=>setView("compare")}>⚖ Compare</button>
+              <button className="btn" style={{background:"#1A1D27",color:"#6B7094",padding:"7px 12px",fontSize:13}} onClick={()=>setSelectedIds([])}>Clear</button>
+            </div>)}
           </div>
         )}
 
-        {/* DETAIL VIEW */}
+        {/* DETAIL */}
         {view==="dashboard"&&detailId&&detail&&(
           <div>
             <button className="btn" style={{background:"#1A1D27",color:"#9CA3C0",padding:"7px 14px",fontSize:13,marginBottom:20}} onClick={()=>setDetailId(null)}>← Back</button>
@@ -340,41 +246,18 @@ function App() {
               <div>
                 <div className="card" style={{padding:24,marginBottom:18}}>
                   <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:18}}>
-                    <div>
-                      <div style={{fontFamily:"monospace",fontSize:11,color:"#4B5268",marginBottom:4}}>{detail.id}</div>
-                      <h2 style={{fontSize:20,fontWeight:600}}>{detail.toolName}</h2>
-                      <div style={{fontSize:13,color:"#6B7094",marginTop:2}}>{detail.toolVendor} · {detail.toolCategory}</div>
-                    </div>
-                    <span className="badge" style={{background:STATUS_CONFIG[detail.status]?.bg,color:STATUS_CONFIG[detail.status]?.color,fontSize:12,padding:"5px 12px"}}>
-                      <span style={{width:6,height:6,borderRadius:"50%",background:STATUS_CONFIG[detail.status]?.dot}}/>
-                      {STATUS_CONFIG[detail.status]?.label}
-                    </span>
+                    <div><div style={{fontFamily:"monospace",fontSize:11,color:"#4B5268",marginBottom:4}}>{detail.id}</div><h2 style={{fontSize:20,fontWeight:600}}>{detail.toolName}</h2><div style={{fontSize:13,color:"#6B7094",marginTop:2}}>{detail.toolVendor} · {detail.toolCategory}</div></div>
+                    <span className="badge" style={{background:STATUS_CONFIG[detail.status]?.bg,color:STATUS_CONFIG[detail.status]?.color,fontSize:12,padding:"5px 12px"}}><span style={{width:6,height:6,borderRadius:"50%",background:STATUS_CONFIG[detail.status]?.dot}}/>{STATUS_CONFIG[detail.status]?.label}</span>
                   </div>
                   <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:12,marginBottom:16}}>
                     {[["Annual Cost",`$${parseFloat(detail.annualCost||0).toLocaleString()}`],["Seats",detail.seats||"—"],["Department",detail.department||"—"],["Category",detail.toolCategory],["Urgency",(detail.urgency||"normal").charAt(0).toUpperCase()+(detail.urgency||"").slice(1)],["By",detail.submitterName]].map(([k,v])=>(
-                      <div key={k} style={{background:"#1A1D27",padding:"11px 13px",borderRadius:8}}>
-                        <div style={{fontSize:10,color:"#4B5268",textTransform:"uppercase",letterSpacing:"0.08em",marginBottom:3}}>{k}</div>
-                        <div style={{fontSize:13,fontWeight:500}}>{v}</div>
-                      </div>
+                      <div key={k} style={{background:"#1A1D27",padding:"11px 13px",borderRadius:8}}><div style={{fontSize:10,color:"#4B5268",textTransform:"uppercase",letterSpacing:"0.08em",marginBottom:3}}>{k}</div><div style={{fontSize:13,fontWeight:500}}>{v}</div></div>
                     ))}
                   </div>
                   <div style={{marginBottom:12}}><div className="sec">Justification</div><p style={{fontSize:13,color:"#B0B4CC",lineHeight:1.7}}>{detail.justification||"—"}</p></div>
                   <div style={{fontSize:11,color:"#4B5268"}}>Submitted {formatDate(detail.submittedAt)} · {detail.submitterEmail}</div>
                 </div>
-                {detail.alternatives?.filter(a=>a.name).length>0&&(
-                  <div className="card" style={{padding:20}}>
-                    <div className="sec">Alternatives Considered</div>
-                    {detail.alternatives.filter(a=>a.name).map((alt,i)=>(
-                      <div key={i} className="alt-card">
-                        <div style={{display:"flex",justifyContent:"space-between"}}>
-                          <div><div style={{fontWeight:500,fontSize:13}}>{alt.name}</div>{alt.vendor&&<div style={{fontSize:11,color:"#6B7094"}}>{alt.vendor}</div>}</div>
-                          {alt.annualCost&&<div style={{fontFamily:"monospace",fontSize:12,color:"#F59E0B"}}>${parseFloat(alt.annualCost).toLocaleString()}/yr</div>}
-                        </div>
-                        {alt.notes&&<div style={{fontSize:12,color:"#9CA3C0",marginTop:6}}>{alt.notes}</div>}
-                      </div>
-                    ))}
-                  </div>
-                )}
+                {detail.alternatives?.filter(a=>a.name).length>0&&(<div className="card" style={{padding:20}}><div className="sec">Alternatives</div>{detail.alternatives.filter(a=>a.name).map((alt,i)=>(<div key={i} className="alt-card"><div style={{display:"flex",justifyContent:"space-between"}}><div><div style={{fontWeight:500,fontSize:13}}>{alt.name}</div>{alt.vendor&&<div style={{fontSize:11,color:"#6B7094"}}>{alt.vendor}</div>}</div>{alt.annualCost&&<div style={{fontFamily:"monospace",fontSize:12,color:"#F59E0B"}}>${parseFloat(alt.annualCost).toLocaleString()}/yr</div>}</div>{alt.notes&&<div style={{fontSize:12,color:"#9CA3C0",marginTop:6}}>{alt.notes}</div>}</div>))}</div>)}
               </div>
               <div>
                 <div className="card" style={{padding:20,marginBottom:14}}>
@@ -389,17 +272,8 @@ function App() {
                 <div className="card" style={{padding:20}}>
                   <div className="sec">Audit Trail</div>
                   {(detail.auditLog||[]).slice().reverse().map((log,i)=>(
-                    <div key={i} className="audit-item">
-                      <div className="audit-dot" style={{background:log.action==="Approved"?"#10B981":log.action==="Rejected"?"#EF4444":log.action==="Submitted"?"#6366F1":"#F59E0B"}}/>
-                      <div style={{flex:1}}>
-                        <div style={{display:"flex",justifyContent:"space-between"}}>
-                          <span style={{fontWeight:500,fontSize:13}}>{log.action}</span>
-                          <span style={{fontSize:10,color:"#4B5268"}}>{formatDate(log.at)}</span>
-                        </div>
-                        <div style={{fontSize:11,color:"#6B7094"}}>by {log.by}</div>
-                        {log.note&&<div style={{fontSize:11,color:"#9CA3C0",marginTop:3,fontStyle:"italic"}}>"{log.note}"</div>}
-                      </div>
-                    </div>
+                    <div key={i} className="audit-item"><div className="audit-dot" style={{background:log.action==="Approved"?"#10B981":log.action==="Rejected"?"#EF4444":log.action==="Submitted"?"#6366F1":"#F59E0B"}}/>
+                    <div style={{flex:1}}><div style={{display:"flex",justifyContent:"space-between"}}><span style={{fontWeight:500,fontSize:13}}>{log.action}</span><span style={{fontSize:10,color:"#4B5268"}}>{formatDate(log.at)}</span></div><div style={{fontSize:11,color:"#6B7094"}}>by {log.by}</div>{log.note&&<div style={{fontSize:11,color:"#9CA3C0",marginTop:3,fontStyle:"italic"}}>"{log.note}"</div>}</div></div>
                   ))}
                 </div>
               </div>
@@ -407,13 +281,10 @@ function App() {
           </div>
         )}
 
-        {/* SUBMIT FORM */}
+        {/* SUBMIT */}
         {view==="submit"&&(
           <div style={{maxWidth:720}}>
-            <div style={{marginBottom:24}}>
-              <h1 style={{fontSize:24,fontWeight:600,color:"#F0F2FA"}}>New Tool Request</h1>
-              <p style={{fontSize:13,color:"#6B7094",marginTop:3}}>Saved permanently to Firebase</p>
-            </div>
+            <div style={{marginBottom:24}}><h1 style={{fontSize:24,fontWeight:600,color:"#F0F2FA"}}>New Tool Request</h1><p style={{fontSize:13,color:"#6B7094",marginTop:3}}>Saved permanently to Firebase</p></div>
             <div className="card" style={{padding:24,marginBottom:16}}>
               <div className="sec">Requester Information</div>
               <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:14}}>
@@ -428,17 +299,7 @@ function App() {
                 <div><label>Tool Name *</label><input className="inp" placeholder="e.g. Figma" value={form.toolName} onChange={e=>setForm({...form,toolName:e.target.value})}/></div>
                 <div><label>Vendor</label><input className="inp" placeholder="e.g. Figma Inc." value={form.toolVendor} onChange={e=>setForm({...form,toolVendor:e.target.value})}/></div>
                 <div><label>Category</label><select className="inp" value={form.toolCategory} onChange={e=>setForm({...form,toolCategory:e.target.value})}>{CATEGORIES.map(c=><option key={c}>{c}</option>)}</select></div>
-                <div><label>Urgency</label>
-                  <div style={{display:"flex",gap:7}}>
-                    {["low","normal","high"].map(u=>(
-                      <button key={u} className="urg-btn"
-                        style={form.urgency===u?{background:u==="high"?"#3A1E1E":u==="normal"?"#1E2B3A":"#1E3A2F",color:u==="high"?"#EF4444":u==="normal"?"#6366F1":"#10B981",borderColor:u==="high"?"#EF4444":u==="normal"?"#6366F1":"#10B981"}:{}}
-                        onClick={()=>setForm({...form,urgency:u})}>
-                        {u.charAt(0).toUpperCase()+u.slice(1)}
-                      </button>
-                    ))}
-                  </div>
-                </div>
+                <div><label>Urgency</label><div style={{display:"flex",gap:7}}>{["low","normal","high"].map(u=><button key={u} className="urg-btn" style={form.urgency===u?{background:u==="high"?"#3A1E1E":u==="normal"?"#1E2B3A":"#1E3A2F",color:u==="high"?"#EF4444":u==="normal"?"#6366F1":"#10B981",borderColor:u==="high"?"#EF4444":u==="normal"?"#6366F1":"#10B981"}:{}} onClick={()=>setForm({...form,urgency:u})}>{u.charAt(0).toUpperCase()+u.slice(1)}</button>)}</div></div>
               </div>
               <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:14,marginBottom:14}}>
                 <div><label>Annual Cost (USD) *</label><input className="inp" type="number" placeholder="e.g. 12000" value={form.annualCost} onChange={e=>setForm({...form,annualCost:e.target.value})}/></div>
@@ -478,24 +339,11 @@ function App() {
         {view==="compare"&&(
           <div>
             <div style={{marginBottom:24}}><h1 style={{fontSize:24,fontWeight:600,color:"#F0F2FA"}}>Compare Tools</h1></div>
-            {compareList.length<2?(
-              <div className="card" style={{padding:60,textAlign:"center"}}>
-                <div style={{fontSize:36,marginBottom:10}}>⚖</div>
-                <div style={{fontSize:14,color:"#6B7094"}}>Tick checkboxes on <span style={{color:"#6366F1",cursor:"pointer"}} onClick={()=>setView("dashboard")}>Dashboard</span> to select 2+ tools</div>
-              </div>
-            ):(
+            {compareList.length<2?(<div className="card" style={{padding:60,textAlign:"center"}}><div style={{fontSize:36,marginBottom:10}}>⚖</div><div style={{fontSize:14,color:"#6B7094"}}>Tick checkboxes on <span style={{color:"#6366F1",cursor:"pointer"}} onClick={()=>setView("dashboard")}>Dashboard</span> to select 2+ tools</div></div>):(
               <div className="card" style={{overflow:"hidden"}}>
                 <div style={{display:"flex",borderBottom:"1px solid #252836"}}>
                   <div style={{width:140,flexShrink:0,background:"#0F1117",padding:18}}><div style={{fontSize:10,fontWeight:600,color:"#4B5268",textTransform:"uppercase",letterSpacing:"0.08em"}}>Criteria</div></div>
-                  {compareList.map(s=>(
-                    <div key={s.id} style={{flex:1,padding:18,borderLeft:"1px solid #252836"}}>
-                      <div style={{fontWeight:600,fontSize:14}}>{s.toolName}</div>
-                      <div style={{fontSize:11,color:"#6B7094",marginBottom:6}}>{s.toolVendor}</div>
-                      <span className="badge" style={{background:STATUS_CONFIG[s.status]?.bg,color:STATUS_CONFIG[s.status]?.color}}>
-                        <span style={{width:5,height:5,borderRadius:"50%",background:STATUS_CONFIG[s.status]?.dot}}/>{STATUS_CONFIG[s.status]?.label}
-                      </span>
-                    </div>
-                  ))}
+                  {compareList.map(s=><div key={s.id} style={{flex:1,padding:18,borderLeft:"1px solid #252836"}}><div style={{fontWeight:600,fontSize:14}}>{s.toolName}</div><div style={{fontSize:11,color:"#6B7094",marginBottom:6}}>{s.toolVendor}</div><span className="badge" style={{background:STATUS_CONFIG[s.status]?.bg,color:STATUS_CONFIG[s.status]?.color}}><span style={{width:5,height:5,borderRadius:"50%",background:STATUS_CONFIG[s.status]?.dot}}/>{STATUS_CONFIG[s.status]?.label}</span></div>)}
                 </div>
                 {[["Annual Cost",s=>`$${parseFloat(s.annualCost||0).toLocaleString()}`],["Seats",s=>s.seats||"—"],["Category",s=>s.toolCategory],["Department",s=>s.department||"—"],["Urgency",s=>(s.urgency||"normal").charAt(0).toUpperCase()+(s.urgency||"").slice(1)],["Submitted By",s=>s.submitterName],["Alternatives",s=>`${s.alternatives?.filter(a=>a.name).length||0} listed`],["Date",s=>formatDate(s.submittedAt)]].map(([label,fn])=>(
                   <div key={label} style={{display:"flex",borderBottom:"1px solid #1A1D27"}}>
@@ -503,42 +351,22 @@ function App() {
                     {compareList.map(s=><div key={s.id} style={{flex:1,padding:"12px 18px",borderLeft:"1px solid #1A1D27",fontSize:13}}>{fn(s)}</div>)}
                   </div>
                 ))}
-                <div style={{display:"flex"}}>
-                  <div style={{width:140,flexShrink:0,background:"#0F1117",padding:18}}><span style={{fontSize:11,fontWeight:600,color:"#4B5268",textTransform:"uppercase",letterSpacing:"0.06em"}}>Justification</span></div>
-                  {compareList.map(s=><div key={s.id} style={{flex:1,padding:"14px 18px",borderLeft:"1px solid #252836",fontSize:12,color:"#9CA3C0",lineHeight:1.6}}>{s.justification||"—"}</div>)}
-                </div>
+                <div style={{display:"flex"}}><div style={{width:140,flexShrink:0,background:"#0F1117",padding:18}}><span style={{fontSize:11,fontWeight:600,color:"#4B5268",textTransform:"uppercase",letterSpacing:"0.06em"}}>Justification</span></div>{compareList.map(s=><div key={s.id} style={{flex:1,padding:"14px 18px",borderLeft:"1px solid #252836",fontSize:12,color:"#9CA3C0",lineHeight:1.6}}>{s.justification||"—"}</div>)}</div>
               </div>
             )}
           </div>
         )}
 
-        {/* AUDIT TRAIL */}
+        {/* AUDIT */}
         {view==="audit"&&(
           <div>
-            <div style={{marginBottom:24}}>
-              <h1 style={{fontSize:24,fontWeight:600,color:"#F0F2FA"}}>Audit Trail</h1>
-              <p style={{fontSize:13,color:"#6B7094",marginTop:3}}>Complete history — stored permanently in Firebase</p>
-            </div>
-            {submissions.length===0?(
-              <div className="card" style={{padding:60,textAlign:"center",color:"#4B5268"}}>
-                <div style={{fontSize:36,marginBottom:12}}>📋</div><div>No records yet.</div>
-              </div>
-            ):(
+            <div style={{marginBottom:24}}><h1 style={{fontSize:24,fontWeight:600,color:"#F0F2FA"}}>Audit Trail</h1><p style={{fontSize:13,color:"#6B7094",marginTop:3}}>Stored permanently in Firebase</p></div>
+            {submissions.length===0?(<div className="card" style={{padding:60,textAlign:"center",color:"#4B5268"}}><div style={{fontSize:36,marginBottom:12}}>📋</div><div>No records yet.</div></div>):(
               <div className="card" style={{padding:22}}>
-                {submissions.flatMap(s=>(s.auditLog||[]).map(log=>({...log,requestId:s.id,toolName:s.toolName}))).sort((a,b)=>new Date(b.at)-new Date(a.at)).map((log,i)=>(
+                {submissions.flatMap(s=>(s.auditLog||[]).map(log=>({...log,toolName:s.toolName}))).sort((a,b)=>new Date(b.at)-new Date(a.at)).map((log,i)=>(
                   <div key={i} className="audit-item" style={{alignItems:"flex-start"}}>
                     <div className="audit-dot" style={{background:log.action==="Approved"?"#10B981":log.action==="Rejected"?"#EF4444":log.action==="Submitted"?"#6366F1":"#F59E0B",marginTop:6}}/>
-                    <div style={{flex:1}}>
-                      <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
-                        <div>
-                          <span style={{fontWeight:500,fontSize:13}}>{log.action}</span>
-                          <span style={{fontSize:12,color:"#6B7094",marginLeft:8}}>— {log.toolName}</span>
-                        </div>
-                        <span style={{fontSize:11,color:"#4B5268",whiteSpace:"nowrap",marginLeft:12}}>{formatDate(log.at)}</span>
-                      </div>
-                      <div style={{fontSize:11,color:"#6B7094",marginTop:2}}>by {log.by}</div>
-                      {log.note&&<div style={{fontSize:11,color:"#9CA3C0",marginTop:3,fontStyle:"italic"}}>"{log.note}"</div>}
-                    </div>
+                    <div style={{flex:1}}><div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}><div><span style={{fontWeight:500,fontSize:13}}>{log.action}</span><span style={{fontSize:12,color:"#6B7094",marginLeft:8}}>— {log.toolName}</span></div><span style={{fontSize:11,color:"#4B5268",whiteSpace:"nowrap",marginLeft:12}}>{formatDate(log.at)}</span></div><div style={{fontSize:11,color:"#6B7094",marginTop:2}}>by {log.by}</div>{log.note&&<div style={{fontSize:11,color:"#9CA3C0",marginTop:3,fontStyle:"italic"}}>"{log.note}"</div>}</div>
                   </div>
                 ))}
               </div>
@@ -547,12 +375,7 @@ function App() {
         )}
       </div>
 
-      {/* Toast */}
-      {toast&&(
-        <div className="toast" style={{background:toast.type==="error"?"#3A1E1E":"#1E3A2F",color:toast.type==="error"?"#EF4444":"#10B981",border:`1px solid ${toast.type==="error"?"#EF444430":"#10B98130"}`}}>
-          <span>{toast.type==="error"?"⚠":"✓"}</span>{toast.msg}
-        </div>
-      )}
+      {toast&&(<div className="toast" style={{background:toast.type==="error"?"#3A1E1E":"#1E3A2F",color:toast.type==="error"?"#EF4444":"#10B981",border:`1px solid ${toast.type==="error"?"#EF444430":"#10B98130"}`}}><span>{toast.type==="error"?"⚠":"✓"}</span>{toast.msg}</div>)}
     </div>
   );
 }
