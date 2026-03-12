@@ -28,7 +28,6 @@
   firebase.initializeApp(firebaseConfig);
   const db = firebase.firestore();
   db.settings({ experimentalForceLongPolling: true, merge: true });
-  console.log("✅ Firebase ready:", firebaseConfig.projectId);
 </script>
 </head>
 <body>
@@ -36,12 +35,26 @@
 <script type="text/babel">
 const { useState, useEffect, useRef } = React;
 
+// ── STATUS FLOW ──────────────────────────────────────────────
+// pending → manager-review → manager-rejected (FINAL, stored)
+//                          → procurement-review → approved (FINAL)
+//                                               → rejected  (FINAL, stored)
+
 const STATUS_CONFIG = {
-  pending:        { label:"Pending Review",  color:"#F59E0B", bg:"#F59E0B20", dot:"#F59E0B" },
-  approved:       { label:"Approved",        color:"#10B981", bg:"#10B98120", dot:"#10B981" },
-  rejected:       { label:"Rejected",        color:"#EF4444", bg:"#EF444420", dot:"#EF4444" },
-  "under-review": { label:"Under Review",    color:"#6366F1", bg:"#6366F120", dot:"#6366F1" },
+  "pending":            { label:"Pending",             color:"#94A3B8", bg:"#94A3B820", dot:"#94A3B8" },
+  "manager-review":     { label:"Awaiting Manager",    color:"#F59E0B", bg:"#F59E0B20", dot:"#F59E0B" },
+  "manager-rejected":   { label:"Manager Rejected",    color:"#EF4444", bg:"#EF444420", dot:"#EF4444" },
+  "procurement-review": { label:"Awaiting Procurement",color:"#6366F1", bg:"#6366F120", dot:"#6366F1" },
+  "approved":           { label:"Approved",            color:"#10B981", bg:"#10B98120", dot:"#10B981" },
+  "rejected":           { label:"Procurement Rejected",color:"#DC2626", bg:"#DC262620", dot:"#DC2626" },
 };
+
+const APPROVAL_STEPS = [
+  { key:"submitted",          label:"Submitted",            icon:"📝" },
+  { key:"manager-review",     label:"Manager Approval",     icon:"👤" },
+  { key:"procurement-review", label:"Procurement Review",   icon:"🏢" },
+  { key:"approved",           label:"Final Decision",       icon:"✅" },
+];
 
 const CATEGORIES = ["Productivity","Security","Analytics","Communication","DevOps","HR","Finance","Other"];
 
@@ -53,6 +66,7 @@ function formatDate(val) {
 
 const initialForm = {
   submitterName:"", submitterEmail:"", department:"",
+  managerName:"", managerEmail:"",
   toolName:"", toolVendor:"", toolCategory:"Productivity",
   annualCost:"", seats:"", justification:"",
   alternatives:[{name:"",vendor:"",annualCost:"",notes:""}],
@@ -63,6 +77,7 @@ const css = `
   input,textarea,select{font-family:'DM Sans','Segoe UI',sans-serif;}
   .btn{cursor:pointer;border:none;border-radius:8px;font-family:inherit;font-weight:500;transition:all 0.15s;}
   .btn:hover{filter:brightness(1.1);transform:translateY(-1px);}
+  .btn:active{transform:translateY(0);}
   .card{background:#161922;border:1px solid #252836;border-radius:12px;}
   .inp{background:#1A1D27;border:1px solid #2E3347;border-radius:8px;padding:10px 14px;color:#E8EAF0;width:100%;font-size:14px;outline:none;transition:border-color 0.15s;}
   .inp:focus{border-color:#6366F1;}
@@ -88,8 +103,220 @@ const css = `
   @keyframes spin{to{transform:rotate(360deg);}}
   .live-dot{width:7px;height:7px;border-radius:50%;background:#10B981;display:inline-block;animation:pulse 2s infinite;}
   @keyframes pulse{0%,100%{opacity:1;}50%{opacity:0.3;}}
+  .step-line{position:absolute;top:16px;left:calc(50% + 16px);right:calc(-50% + 16px);height:2px;background:#252836;}
+  .step-line.done{background:#10B981;}
+  .step-line.active{background:#6366F1;}
+  .email-box{background:#1A1D27;border:1px solid #2E3347;border-radius:10px;padding:16px;font-size:12px;color:#9CA3C0;line-height:1.8;font-family:monospace;white-space:pre-wrap;word-break:break-all;}
+  .approve-page{min-height:100vh;display:flex;align-items:center;justify-content:center;background:#0F1117;}
 `;
 
+// ── MANAGER APPROVAL PAGE (shown when ?action= is in URL) ────
+function ManagerApprovalPage({ docId, action }) {
+  const [request, setRequest] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [note, setNote]       = useState("");
+  const [done, setDone]       = useState(false);
+  const [saving, setSaving]   = useState(false);
+  const [error, setError]     = useState(null);
+
+  useEffect(() => {
+    db.collection("procurements").doc(docId).get()
+      .then(d => { if (d.exists) setRequest({id:d.id,...d.data()}); else setError("Request not found."); setLoading(false); })
+      .catch(e => { setError(e.message); setLoading(false); });
+  }, [docId]);
+
+  const decide = async (approved) => {
+    if (!request) return;
+    if (request.status !== "manager-review") { setError("This request has already been actioned."); return; }
+    setSaving(true);
+    const newStatus = approved ? "procurement-review" : "manager-rejected";
+    const logEntry  = { action: approved ? "Manager Approved" : "Manager Rejected", by: request.managerName, at: new Date().toISOString(), note };
+    try {
+      await db.collection("procurements").doc(docId).update({
+        status: newStatus,
+        auditLog: firebase.firestore.FieldValue.arrayUnion(logEntry),
+        updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
+      });
+      setDone(approved ? "approved" : "rejected");
+    } catch(e) { setError(e.message); }
+    setSaving(false);
+  };
+
+  if (loading) return <div className="approve-page"><div style={{textAlign:"center",color:"#6B7094"}}><div style={{fontSize:32,marginBottom:12}}>⏳</div>Loading…</div></div>;
+  if (error)   return <div className="approve-page"><div style={{textAlign:"center",color:"#EF4444",maxWidth:400,padding:24}}><div style={{fontSize:32,marginBottom:12}}>⚠</div>{error}</div></div>;
+
+  if (done) return (
+    <div className="approve-page">
+      <div style={{textAlign:"center",maxWidth:440,padding:32}}>
+        <div style={{fontSize:56,marginBottom:16}}>{done==="approved"?"✅":"❌"}</div>
+        <h2 style={{fontSize:22,fontWeight:600,color:"#F0F2FA",marginBottom:8}}>{done==="approved"?"Request Approved!":"Request Rejected"}</h2>
+        <p style={{color:"#6B7094",fontSize:14,lineHeight:1.7}}>{done==="approved" ? `You've approved the request for <strong>${request?.toolName}</strong>. It has been forwarded to the Procurement team for final review.` : `You've rejected the request for <strong>${request?.toolName}</strong>. This has been recorded.`}</p>
+        <div style={{marginTop:20,padding:"14px 20px",background:"#161922",border:"1px solid #252836",borderRadius:10,fontSize:12,color:"#6B7094"}}>You can close this tab.</div>
+      </div>
+    </div>
+  );
+
+  if (request.status !== "manager-review") return (
+    <div className="approve-page">
+      <div style={{textAlign:"center",maxWidth:440,padding:32}}>
+        <div style={{fontSize:48,marginBottom:12}}>🔒</div>
+        <h2 style={{fontSize:20,fontWeight:600,color:"#F0F2FA",marginBottom:8}}>Already Actioned</h2>
+        <p style={{color:"#6B7094",fontSize:14}}>This request has already been {STATUS_CONFIG[request.status]?.label?.toLowerCase()}. No further action needed.</p>
+      </div>
+    </div>
+  );
+
+  return (
+    <div className="approve-page">
+      <div style={{maxWidth:520,width:"100%",padding:24}}>
+        <div style={{textAlign:"center",marginBottom:28}}>
+          <div style={{width:48,height:48,background:"linear-gradient(135deg,#6366F1,#8B5CF6)",borderRadius:12,display:"inline-flex",alignItems:"center",justifyContent:"center",fontSize:22,marginBottom:12}}>⚙</div>
+          <h1 style={{fontSize:22,fontWeight:600,color:"#F0F2FA"}}>ProcureIQ — Manager Approval</h1>
+          <p style={{fontSize:13,color:"#6B7094",marginTop:4}}>Hi <strong style={{color:"#E8EAF0"}}>{request.managerName}</strong>, your approval is needed</p>
+        </div>
+        <div className="card" style={{padding:22,marginBottom:16}}>
+          <div className="sec">Request Summary</div>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:14}}>
+            {[["Tool",request.toolName],["Vendor",request.toolVendor||"—"],["Annual Cost",`$${parseFloat(request.annualCost||0).toLocaleString()}`],["Seats",request.seats||"—"],["Department",request.department||"—"],["Submitted By",request.submitterName]].map(([k,v])=>(
+              <div key={k} style={{background:"#1A1D27",padding:"10px 12px",borderRadius:8}}>
+                <div style={{fontSize:10,color:"#4B5268",textTransform:"uppercase",letterSpacing:"0.08em",marginBottom:2}}>{k}</div>
+                <div style={{fontSize:13,fontWeight:500}}>{v}</div>
+              </div>
+            ))}
+          </div>
+          {request.justification && <div><div className="sec">Justification</div><p style={{fontSize:13,color:"#B0B4CC",lineHeight:1.7}}>{request.justification}</p></div>}
+        </div>
+        {request.alternatives?.filter(a=>a.name).length>0&&(
+          <div className="card" style={{padding:20,marginBottom:16}}>
+            <div className="sec">Alternatives Considered</div>
+            {request.alternatives.filter(a=>a.name).map((alt,i)=>(
+              <div key={i} style={{display:"flex",justifyContent:"space-between",padding:"8px 0",borderBottom:"1px solid #1E2130"}}>
+                <span style={{fontSize:13}}>{alt.name} {alt.vendor&&<span style={{color:"#6B7094",fontSize:11}}>({alt.vendor})</span>}</span>
+                {alt.annualCost&&<span style={{fontFamily:"monospace",fontSize:12,color:"#F59E0B"}}>${parseFloat(alt.annualCost).toLocaleString()}/yr</span>}
+              </div>
+            ))}
+          </div>
+        )}
+        <div className="card" style={{padding:20,marginBottom:16}}>
+          <label>Add a note (optional)</label>
+          <textarea className="inp" rows={3} placeholder="Reason for approval or rejection…" value={note} onChange={e=>setNote(e.target.value)} style={{resize:"none"}}/>
+        </div>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
+          <button className="btn" style={{background:"#10B981",color:"white",padding:"13px",fontSize:14,opacity:saving?0.7:1}} onClick={()=>decide(true)} disabled={saving}>
+            {saving?<span className="spinner"/>:"✓ Approve Request"}
+          </button>
+          <button className="btn" style={{background:"#EF4444",color:"white",padding:"13px",fontSize:14,opacity:saving?0.7:1}} onClick={()=>decide(false)} disabled={saving}>
+            {saving?<span className="spinner"/>:"✕ Reject Request"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── APPROVAL STEPPER ─────────────────────────────────────────
+function ApprovalStepper({ status }) {
+  const getStepState = (stepKey) => {
+    const order = ["pending","manager-review","procurement-review","approved"];
+    const rejected = status==="manager-rejected"||status==="rejected";
+    const idx = order.indexOf(status==="manager-rejected"?"manager-review":status==="rejected"?"procurement-review":status);
+    const sIdx = order.indexOf(stepKey==="submitted"?"pending":stepKey);
+    if (rejected && stepKey==="approved") return "rejected";
+    if (sIdx < idx) return "done";
+    if (sIdx === idx) return rejected?"rejected":"active";
+    return "pending";
+  };
+  const steps = [
+    {label:"Submitted",icon:"📝",key:"submitted"},
+    {label:"Manager",icon:"👤",key:"manager-review"},
+    {label:"Procurement",icon:"🏢",key:"procurement-review"},
+    {label:"Decision",icon:"✅",key:"approved"},
+  ];
+  return (
+    <div style={{display:"flex",alignItems:"flex-start",marginBottom:24,padding:"20px 24px",background:"#161922",border:"1px solid #252836",borderRadius:12}}>
+      {steps.map((step,i)=>{
+        const state = getStepState(step.key);
+        const color = state==="done"?"#10B981":state==="active"?"#6366F1":state==="rejected"?"#EF4444":"#2E3347";
+        const textColor = state==="pending"?"#4B5268":state==="rejected"?"#EF4444":state==="done"?"#10B981":"#6366F1";
+        return (
+          <div key={step.key} style={{flex:1,display:"flex",flexDirection:"column",alignItems:"center",position:"relative"}}>
+            {i<steps.length-1&&<div style={{position:"absolute",top:16,left:"50%",width:"100%",height:2,background:state==="done"?"#10B981":"#252836",zIndex:0}}/>}
+            <div style={{width:32,height:32,borderRadius:"50%",background:color+"20",border:`2px solid ${color}`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:14,position:"relative",zIndex:1}}>{state==="done"?"✓":state==="rejected"?"✕":step.icon}</div>
+            <div style={{fontSize:11,color:textColor,marginTop:6,fontWeight:500,textAlign:"center"}}>{step.label}</div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+// ── EMAIL PREVIEW MODAL ──────────────────────────────────────
+function EmailModal({ request, onClose }) {
+  const appUrl = window.location.origin + window.location.pathname;
+  const approveUrl = `${appUrl}?docId=${request.id}&action=approve`;
+  const emailBody = `Hi ${request.managerName},
+
+A procurement request has been submitted by ${request.submitterName} (${request.department}) and requires your approval.
+
+━━━━━━━━━━━━━━━━━━━━━━
+REQUEST DETAILS
+━━━━━━━━━━━━━━━━━━━━━━
+Tool Name   : ${request.toolName}
+Vendor      : ${request.toolVendor||"—"}
+Annual Cost : $${parseFloat(request.annualCost||0).toLocaleString()}
+Seats       : ${request.seats||"—"}
+Category    : ${request.toolCategory}
+Urgency     : ${(request.urgency||"normal").toUpperCase()}
+
+Justification:
+${request.justification||"—"}
+
+━━━━━━━━━━━━━━━━━━━━━━
+APPROVAL LINK
+━━━━━━━━━━━━━━━━━━━━━━
+Click the link below to approve or reject this request:
+
+${approveUrl}
+
+This link is specific to this request. Once you click Approve or Reject, your decision will be recorded permanently.
+
+— ProcureIQ System`;
+
+  const mailtoLink = `mailto:${request.managerEmail}?subject=Approval Required: ${request.toolName} — ProcureIQ Request&body=${encodeURIComponent(emailBody)}`;
+
+  return (
+    <div style={{position:"fixed",inset:0,background:"#00000090",zIndex:1000,display:"flex",alignItems:"center",justifyContent:"center",padding:20}}>
+      <div style={{background:"#161922",border:"1px solid #252836",borderRadius:14,width:"100%",maxWidth:580,maxHeight:"90vh",overflow:"auto"}}>
+        <div style={{padding:"20px 24px",borderBottom:"1px solid #1E2130",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+          <div>
+            <div style={{fontWeight:600,fontSize:16}}>📧 Send Approval Email</div>
+            <div style={{fontSize:12,color:"#6B7094",marginTop:2}}>To: {request.managerName} ({request.managerEmail})</div>
+          </div>
+          <button className="btn" style={{background:"#1A1D27",color:"#9CA3C0",padding:"6px 12px",fontSize:13}} onClick={onClose}>✕</button>
+        </div>
+        <div style={{padding:24}}>
+          <div style={{marginBottom:16}}>
+            <label style={{marginBottom:8}}>Email Preview</label>
+            <div className="email-box">{emailBody}</div>
+          </div>
+          <div style={{background:"#1A1D27",border:"1px solid #2E3347",borderRadius:8,padding:12,marginBottom:16,fontSize:12,color:"#6B7094"}}>
+            <strong style={{color:"#F59E0B"}}>📎 Approval Link:</strong><br/>
+            <span style={{color:"#6366F1",wordBreak:"break-all"}}>{approveUrl}</span>
+          </div>
+          <div style={{display:"flex",gap:10}}>
+            <a href={mailtoLink} style={{flex:1,textDecoration:"none"}}>
+              <button className="btn" style={{background:"#6366F1",color:"white",padding:"11px",fontSize:14,width:"100%"}}>📧 Open in Email Client</button>
+            </a>
+            <button className="btn" style={{background:"#1A1D27",color:"#9CA3C0",padding:"11px 16px",fontSize:14}} onClick={()=>{navigator.clipboard.writeText(approveUrl);}} title="Copy approval link">📋 Copy Link</button>
+          </div>
+          <div style={{marginTop:10,fontSize:11,color:"#4B5268",textAlign:"center"}}>The manager clicks the link → opens a page → approves or rejects directly</div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── MAIN APP ─────────────────────────────────────────────────
 function App() {
   const [view, setView]               = useState("dashboard");
   const [submissions, setSubmissions] = useState([]);
@@ -103,19 +330,20 @@ function App() {
   const [sortBy, setSortBy]           = useState("date");
   const [searchQuery, setSearchQuery] = useState("");
   const [saving, setSaving]           = useState(false);
+  const [emailModal, setEmailModal]   = useState(null);
   const toastTimer = useRef(null);
 
   useEffect(() => {
     const unsub = db.collection("procurements")
-      .orderBy("submittedAt", "desc")
+      .orderBy("submittedAt","desc")
       .onSnapshot(
         snap => { setSubmissions(snap.docs.map(d=>({id:d.id,...d.data()}))); setLoading(false); },
-        err  => { console.error("Firestore:", err); showToast("DB Error: "+err.message,"error"); setLoading(false); }
+        err  => { showToast("DB Error: "+err.message,"error"); setLoading(false); }
       );
-    return () => unsub();
-  }, []);
+    return ()=>unsub();
+  },[]);
 
-  const showToast = (msg, type="success") => {
+  const showToast = (msg,type="success") => {
     setToast({msg,type});
     clearTimeout(toastTimer.current);
     toastTimer.current = setTimeout(()=>setToast(null),4000);
@@ -123,29 +351,37 @@ function App() {
 
   const submitForm = async () => {
     if (!form.submitterName||!form.toolName||!form.annualCost){showToast("Fill in Name, Tool Name and Cost.","error");return;}
+    if (!form.managerName||!form.managerEmail){showToast("Please enter your Manager's name and email.","error");return;}
     setSaving(true);
     try {
-      await db.collection("procurements").add({
-        ...form, status:"pending",
+      const ref = await db.collection("procurements").add({
+        ...form, status:"manager-review",
         submittedAt: firebase.firestore.FieldValue.serverTimestamp(),
-        auditLog:[{action:"Submitted",by:form.submitterName,at:new Date().toISOString(),note:""}],
+        auditLog:[{action:"Submitted",by:form.submitterName,at:new Date().toISOString(),note:"Awaiting manager approval"}],
       });
-      setForm(initialForm); setView("dashboard");
-      showToast("Request submitted successfully!");
-    } catch(e) { showToast("Error: "+e.message,"error"); }
+      const newDoc = {id:ref.id,...form};
+      setForm(initialForm);
+      setView("dashboard");
+      showToast("Request submitted! Now send the approval email to your manager.");
+      setTimeout(()=>setEmailModal(newDoc),600);
+    } catch(e){showToast("Error: "+e.message,"error");}
     setSaving(false);
   };
 
-  const updateStatus = async (id,status,note="") => {
+  const procurementAction = async (id,approved,note="") => {
     try {
       const s = submissions.find(x=>x.id===id);
+      const newStatus = approved?"approved":"rejected";
       await db.collection("procurements").doc(id).update({
-        status,
-        auditLog:[...(s.auditLog||[]),{action:status==="approved"?"Approved":status==="rejected"?"Rejected":"Moved to Under Review",by:"Procurement Team",at:new Date().toISOString(),note}],
+        status: newStatus,
+        auditLog: firebase.firestore.FieldValue.arrayUnion({
+          action: approved?"Procurement Approved":"Procurement Rejected",
+          by:"Procurement Team", at:new Date().toISOString(), note
+        }),
         updatedAt: firebase.firestore.FieldValue.serverTimestamp()
       });
       setApprovalNote("");
-      showToast(status==="approved"?"Approved ✓":status==="rejected"?"Rejected":"Updated.");
+      showToast(approved?"✓ Finally Approved!":"Request Rejected.");
     } catch(e){showToast("Error: "+e.message,"error");}
   };
 
@@ -155,14 +391,22 @@ function App() {
     .filter(s=>!searchQuery||s.toolName?.toLowerCase().includes(searchQuery.toLowerCase())||s.submitterName?.toLowerCase().includes(searchQuery.toLowerCase()))
     .sort((a,b)=>sortBy==="cost"?parseFloat(b.annualCost||0)-parseFloat(a.annualCost||0):sortBy==="tool"?(a.toolName||"").localeCompare(b.toolName||""):0);
   const compareList = submissions.filter(s=>selectedIds.includes(s.id));
-  const stats={total:submissions.length,pending:submissions.filter(s=>s.status==="pending").length,approved:submissions.filter(s=>s.status==="approved").length,rejected:submissions.filter(s=>s.status==="rejected").length,totalCost:submissions.filter(s=>s.status==="approved").reduce((sum,s)=>sum+(parseFloat(s.annualCost)||0),0)};
+  const stats={
+    total:submissions.length,
+    pending:submissions.filter(s=>s.status==="manager-review").length,
+    procurement:submissions.filter(s=>s.status==="procurement-review").length,
+    approved:submissions.filter(s=>s.status==="approved").length,
+    rejected:submissions.filter(s=>s.status==="manager-rejected"||s.status==="rejected").length,
+    totalCost:submissions.filter(s=>s.status==="approved").reduce((sum,s)=>sum+(parseFloat(s.annualCost)||0),0),
+  };
   const nav=v=>{setView(v);setDetailId(null);};
 
   return (
     <div style={{fontFamily:"'DM Sans','Segoe UI',sans-serif",background:"#0F1117",minHeight:"100vh",color:"#E8EAF0",display:"flex",height:"100vh",overflow:"hidden"}}>
       <style>{css}</style>
+
       {/* Sidebar */}
-      <div style={{width:220,background:"#0D0F18",borderRight:"1px solid #1E2130",display:"flex",flexDirection:"column",padding:"20px 10px",flexShrink:0}}>
+      <div style={{width:224,background:"#0D0F18",borderRight:"1px solid #1E2130",display:"flex",flexDirection:"column",padding:"20px 10px",flexShrink:0}}>
         <div style={{padding:"0 8px 20px",borderBottom:"1px solid #1E2130"}}>
           <div style={{display:"flex",alignItems:"center",gap:10}}>
             <div style={{width:32,height:32,background:"linear-gradient(135deg,#6366F1,#8B5CF6)",borderRadius:8,display:"flex",alignItems:"center",justifyContent:"center",fontSize:16}}>⚙</div>
@@ -173,13 +417,17 @@ function App() {
           {[["dashboard","📊","Dashboard"],["submit","✚","New Request"],["compare","⚖","Compare Tools"],["audit","📋","Audit Trail"]].map(([v,icon,label])=>(
             <div key={v} className={`nav-item${view===v?" active":""}`} onClick={()=>nav(v)}>
               <span style={{fontSize:15}}>{icon}</span>{label}
-              {v==="dashboard"&&stats.pending>0&&<span style={{marginLeft:"auto",background:"#6366F1",color:"white",borderRadius:10,fontSize:11,padding:"1px 7px",fontWeight:600}}>{stats.pending}</span>}
+              {v==="dashboard"&&stats.pending>0&&<span style={{marginLeft:"auto",background:"#F59E0B",color:"#0D0F18",borderRadius:10,fontSize:11,padding:"1px 7px",fontWeight:700}}>{stats.pending}</span>}
+              {v==="dashboard"&&stats.procurement>0&&<span style={{marginLeft:stats.pending>0?"4px":"auto",background:"#6366F1",color:"white",borderRadius:10,fontSize:11,padding:"1px 7px",fontWeight:700}}>{stats.procurement}</span>}
             </div>
           ))}
         </nav>
         <div style={{padding:"14px 8px 0",borderTop:"1px solid #1E2130",fontSize:12,color:"#4B5268"}}>
-          <div>{stats.total} total requests</div>
-          <div style={{marginTop:4,color:"#10B981",fontWeight:500}}>${stats.totalCost.toLocaleString()} approved/yr</div>
+          <div style={{display:"flex",justifyContent:"space-between",marginBottom:4}}><span>Total</span><span style={{color:"#E8EAF0"}}>{stats.total}</span></div>
+          <div style={{display:"flex",justifyContent:"space-between",marginBottom:4}}><span>Awaiting Manager</span><span style={{color:"#F59E0B"}}>{stats.pending}</span></div>
+          <div style={{display:"flex",justifyContent:"space-between",marginBottom:4}}><span>Awaiting Procurement</span><span style={{color:"#6366F1"}}>{stats.procurement}</span></div>
+          <div style={{display:"flex",justifyContent:"space-between",marginBottom:4}}><span>Approved</span><span style={{color:"#10B981"}}>{stats.approved}</span></div>
+          <div style={{marginTop:8,color:"#10B981",fontWeight:500}}>${stats.totalCost.toLocaleString()} approved/yr</div>
         </div>
       </div>
 
@@ -189,41 +437,44 @@ function App() {
         {/* DASHBOARD */}
         {view==="dashboard"&&!detailId&&(
           <div>
-            <div style={{marginBottom:24}}><h1 style={{fontSize:24,fontWeight:600,color:"#F0F2FA"}}>Procurement Dashboard</h1><p style={{fontSize:13,color:"#6B7094",marginTop:3}}>All data stored permanently in Firebase</p></div>
-            <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:14,marginBottom:24}}>
-              {[["Total",stats.total,"#6366F1","📁"],["Pending",stats.pending,"#F59E0B","⏳"],["Approved",stats.approved,"#10B981","✓"],["Rejected",stats.rejected,"#EF4444","✕"]].map(([label,value,color,icon])=>(
-                <div key={label} className="card" style={{padding:"18px 20px"}}><div style={{fontSize:20,marginBottom:6}}>{icon}</div><div style={{fontSize:26,fontWeight:600,color}}>{value}</div><div style={{fontSize:12,color:"#6B7094",marginTop:2}}>{label}</div></div>
+            <div style={{marginBottom:24}}><h1 style={{fontSize:24,fontWeight:600,color:"#F0F2FA"}}>Procurement Dashboard</h1><p style={{fontSize:13,color:"#6B7094",marginTop:3}}>Two-stage approval: Manager → Procurement</p></div>
+            <div style={{display:"grid",gridTemplateColumns:"repeat(5,1fr)",gap:12,marginBottom:24}}>
+              {[["Total",stats.total,"#6366F1","📁"],["Mgr. Pending",stats.pending,"#F59E0B","👤"],["Proc. Pending",stats.procurement,"#8B5CF6","🏢"],["Approved",stats.approved,"#10B981","✓"],["Rejected",stats.rejected,"#EF4444","✕"]].map(([label,value,color,icon])=>(
+                <div key={label} className="card" style={{padding:"16px 18px"}}><div style={{fontSize:18,marginBottom:6}}>{icon}</div><div style={{fontSize:24,fontWeight:600,color}}>{value}</div><div style={{fontSize:11,color:"#6B7094",marginTop:2}}>{label}</div></div>
               ))}
             </div>
             <div className="card" style={{overflow:"hidden"}}>
               <div style={{padding:"16px 20px",borderBottom:"1px solid #1E2130",display:"flex",alignItems:"center",gap:10,flexWrap:"wrap"}}>
-                <input className="inp" style={{width:200}} placeholder="Search…" value={searchQuery} onChange={e=>setSearchQuery(e.target.value)}/>
+                <input className="inp" style={{width:180}} placeholder="Search…" value={searchQuery} onChange={e=>setSearchQuery(e.target.value)}/>
                 <div style={{display:"flex",gap:5,flexWrap:"wrap"}}>
-                  {["all","pending","under-review","approved","rejected"].map(s=><div key={s} className={`tab${filterStatus===s?" active":""}`} onClick={()=>setFilterStatus(s)}>{s==="all"?"All":STATUS_CONFIG[s]?.label}</div>)}
+                  {[["all","All"],["manager-review","Mgr. Review"],["procurement-review","Proc. Review"],["approved","Approved"],["manager-rejected","Mgr. Rejected"],["rejected","Proc. Rejected"]].map(([s,l])=>(
+                    <div key={s} className={`tab${filterStatus===s?" active":""}`} onClick={()=>setFilterStatus(s)}>{l}</div>
+                  ))}
                 </div>
-                <div style={{marginLeft:"auto"}}><select className="inp" style={{width:120}} value={sortBy} onChange={e=>setSortBy(e.target.value)}><option value="date">Latest</option><option value="cost">Cost</option><option value="tool">Name</option></select></div>
+                <div style={{marginLeft:"auto"}}><select className="inp" style={{width:110}} value={sortBy} onChange={e=>setSortBy(e.target.value)}><option value="date">Latest</option><option value="cost">Cost</option><option value="tool">Name</option></select></div>
               </div>
-              {loading?(<div style={{padding:60,textAlign:"center",color:"#4B5268"}}><div style={{fontSize:32,marginBottom:12}}>⏳</div><div>Connecting to Firebase…</div></div>)
-              :filtered.length===0?(<div style={{padding:60,textAlign:"center",color:"#4B5268"}}><div style={{fontSize:36,marginBottom:12}}>📭</div><div style={{fontSize:14}}>No requests yet. <span style={{color:"#6366F1",cursor:"pointer"}} onClick={()=>setView("submit")}>Submit the first one →</span></div></div>)
+              {loading?(<div style={{padding:60,textAlign:"center",color:"#4B5268"}}><div style={{fontSize:32,marginBottom:12}}>⏳</div>Connecting…</div>)
+              :filtered.length===0?(<div style={{padding:60,textAlign:"center",color:"#4B5268"}}><div style={{fontSize:36,marginBottom:12}}>📭</div><div style={{fontSize:14}}>No requests. <span style={{color:"#6366F1",cursor:"pointer"}} onClick={()=>setView("submit")}>Submit one →</span></div></div>)
               :(
                 <table style={{width:"100%",borderCollapse:"collapse"}}>
-                  <thead><tr style={{background:"#0F1117"}}>{["","ID","Tool","Dept","Cost","Alts","Submitted","Status",""].map((h,i)=><th key={i} style={{padding:"11px 14px",fontSize:10,fontWeight:600,color:"#4B5268",textAlign:"left",textTransform:"uppercase",letterSpacing:"0.07em",whiteSpace:"nowrap"}}>{h}</th>)}</tr></thead>
+                  <thead><tr style={{background:"#0F1117"}}>{["","Tool","Dept","Manager","Cost","Submitted","Status","Actions"].map((h,i)=><th key={i} style={{padding:"11px 12px",fontSize:10,fontWeight:600,color:"#4B5268",textAlign:"left",textTransform:"uppercase",letterSpacing:"0.07em",whiteSpace:"nowrap"}}>{h}</th>)}</tr></thead>
                   <tbody>
                     {filtered.map(s=>{
                       const sc=STATUS_CONFIG[s.status]||STATUS_CONFIG.pending;
                       return(<tr key={s.id} className="row-hover" style={{borderTop:"1px solid #1A1D27"}} onClick={()=>setDetailId(s.id)}>
-                        <td style={{padding:"11px 8px 11px 14px"}}><input type="checkbox" checked={selectedIds.includes(s.id)} onChange={e=>{e.stopPropagation();setSelectedIds(prev=>prev.includes(s.id)?prev.filter(x=>x!==s.id):[...prev,s.id]);}} onClick={e=>e.stopPropagation()}/></td>
-                        <td style={{padding:"11px 14px",fontFamily:"monospace",fontSize:11,color:"#6366F1"}}>{s.id.slice(0,8)}…</td>
-                        <td style={{padding:"11px 14px"}}><div style={{fontWeight:500,fontSize:13}}>{s.toolName}</div><div style={{fontSize:11,color:"#6B7094"}}>{s.toolVendor}</div></td>
-                        <td style={{padding:"11px 14px",fontSize:12,color:"#9CA3C0"}}>{s.department}</td>
-                        <td style={{padding:"11px 14px",fontFamily:"monospace",fontSize:12,fontWeight:500}}>${parseFloat(s.annualCost||0).toLocaleString()}</td>
-                        <td style={{padding:"11px 14px",fontSize:12,color:"#6B7094",textAlign:"center"}}>{s.alternatives?.filter(a=>a.name).length||0}</td>
-                        <td style={{padding:"11px 14px",fontSize:11,color:"#6B7094",whiteSpace:"nowrap"}}>{formatDate(s.submittedAt)}</td>
-                        <td style={{padding:"11px 14px"}}><span className="badge" style={{background:sc.bg,color:sc.color}}><span style={{width:6,height:6,borderRadius:"50%",background:sc.dot}}/>{sc.label}</span></td>
-                        <td style={{padding:"11px 14px"}} onClick={e=>e.stopPropagation()}><div style={{display:"flex",gap:5}}>
-                          {s.status==="pending"&&<button className="btn" style={{background:"#1E2B3A",color:"#6366F1",padding:"4px 10px",fontSize:11}} onClick={()=>updateStatus(s.id,"under-review")}>Review</button>}
-                          {s.status==="under-review"&&<><button className="btn" style={{background:"#1E3A2F",color:"#10B981",padding:"4px 10px",fontSize:11}} onClick={()=>updateStatus(s.id,"approved")}>✓</button><button className="btn" style={{background:"#3A1E1E",color:"#EF4444",padding:"4px 10px",fontSize:11}} onClick={()=>updateStatus(s.id,"rejected")}>✕</button></>}
-                        </div></td>
+                        <td style={{padding:"10px 8px 10px 12px"}}><input type="checkbox" checked={selectedIds.includes(s.id)} onChange={e=>{e.stopPropagation();setSelectedIds(prev=>prev.includes(s.id)?prev.filter(x=>x!==s.id):[...prev,s.id]);}} onClick={e=>e.stopPropagation()}/></td>
+                        <td style={{padding:"10px 12px"}}><div style={{fontWeight:500,fontSize:13}}>{s.toolName}</div><div style={{fontSize:11,color:"#6B7094"}}>{s.submitterName}</div></td>
+                        <td style={{padding:"10px 12px",fontSize:12,color:"#9CA3C0"}}>{s.department}</td>
+                        <td style={{padding:"10px 12px"}}><div style={{fontSize:12,fontWeight:500}}>{s.managerName}</div><div style={{fontSize:11,color:"#6B7094"}}>{s.managerEmail}</div></td>
+                        <td style={{padding:"10px 12px",fontFamily:"monospace",fontSize:12,fontWeight:500}}>${parseFloat(s.annualCost||0).toLocaleString()}</td>
+                        <td style={{padding:"10px 12px",fontSize:11,color:"#6B7094",whiteSpace:"nowrap"}}>{formatDate(s.submittedAt)}</td>
+                        <td style={{padding:"10px 12px"}}><span className="badge" style={{background:sc.bg,color:sc.color}}><span style={{width:6,height:6,borderRadius:"50%",background:sc.dot}}/>{sc.label}</span></td>
+                        <td style={{padding:"10px 12px"}} onClick={e=>e.stopPropagation()}>
+                          <div style={{display:"flex",gap:5}}>
+                            {s.status==="manager-review"&&<button className="btn" style={{background:"#1E2B3A",color:"#6366F1",padding:"4px 10px",fontSize:11}} onClick={()=>setEmailModal(s)}>📧 Resend</button>}
+                            {s.status==="procurement-review"&&<><button className="btn" style={{background:"#1E3A2F",color:"#10B981",padding:"4px 10px",fontSize:11}} onClick={()=>procurementAction(s.id,true)}>✓</button><button className="btn" style={{background:"#3A1E1E",color:"#EF4444",padding:"4px 10px",fontSize:11}} onClick={()=>procurementAction(s.id,false)}>✕</button></>}
+                          </div>
+                        </td>
                       </tr>);
                     })}
                   </tbody>
@@ -242,6 +493,7 @@ function App() {
         {view==="dashboard"&&detailId&&detail&&(
           <div>
             <button className="btn" style={{background:"#1A1D27",color:"#9CA3C0",padding:"7px 14px",fontSize:13,marginBottom:20}} onClick={()=>setDetailId(null)}>← Back</button>
+            <ApprovalStepper status={detail.status}/>
             <div style={{display:"grid",gridTemplateColumns:"1fr 320px",gap:18}}>
               <div>
                 <div className="card" style={{padding:24,marginBottom:18}}>
@@ -250,29 +502,53 @@ function App() {
                     <span className="badge" style={{background:STATUS_CONFIG[detail.status]?.bg,color:STATUS_CONFIG[detail.status]?.color,fontSize:12,padding:"5px 12px"}}><span style={{width:6,height:6,borderRadius:"50%",background:STATUS_CONFIG[detail.status]?.dot}}/>{STATUS_CONFIG[detail.status]?.label}</span>
                   </div>
                   <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:12,marginBottom:16}}>
-                    {[["Annual Cost",`$${parseFloat(detail.annualCost||0).toLocaleString()}`],["Seats",detail.seats||"—"],["Department",detail.department||"—"],["Category",detail.toolCategory],["Urgency",(detail.urgency||"normal").charAt(0).toUpperCase()+(detail.urgency||"").slice(1)],["By",detail.submitterName]].map(([k,v])=>(
+                    {[["Annual Cost",`$${parseFloat(detail.annualCost||0).toLocaleString()}`],["Seats",detail.seats||"—"],["Department",detail.department||"—"],["Category",detail.toolCategory],["Urgency",(detail.urgency||"normal").charAt(0).toUpperCase()+(detail.urgency||"").slice(1)],["Submitted By",detail.submitterName]].map(([k,v])=>(
                       <div key={k} style={{background:"#1A1D27",padding:"11px 13px",borderRadius:8}}><div style={{fontSize:10,color:"#4B5268",textTransform:"uppercase",letterSpacing:"0.08em",marginBottom:3}}>{k}</div><div style={{fontSize:13,fontWeight:500}}>{v}</div></div>
                     ))}
                   </div>
-                  <div style={{marginBottom:12}}><div className="sec">Justification</div><p style={{fontSize:13,color:"#B0B4CC",lineHeight:1.7}}>{detail.justification||"—"}</p></div>
+                  <div style={{background:"#1A1D27",padding:"12px 14px",borderRadius:8,marginBottom:12,display:"flex",gap:20}}>
+                    <div><div style={{fontSize:10,color:"#4B5268",textTransform:"uppercase",letterSpacing:"0.08em",marginBottom:3}}>Manager</div><div style={{fontSize:13,fontWeight:500}}>{detail.managerName}</div><div style={{fontSize:11,color:"#6B7094"}}>{detail.managerEmail}</div></div>
+                  </div>
+                  {detail.justification&&<div style={{marginBottom:12}}><div className="sec">Justification</div><p style={{fontSize:13,color:"#B0B4CC",lineHeight:1.7}}>{detail.justification}</p></div>}
                   <div style={{fontSize:11,color:"#4B5268"}}>Submitted {formatDate(detail.submittedAt)} · {detail.submitterEmail}</div>
                 </div>
-                {detail.alternatives?.filter(a=>a.name).length>0&&(<div className="card" style={{padding:20}}><div className="sec">Alternatives</div>{detail.alternatives.filter(a=>a.name).map((alt,i)=>(<div key={i} className="alt-card"><div style={{display:"flex",justifyContent:"space-between"}}><div><div style={{fontWeight:500,fontSize:13}}>{alt.name}</div>{alt.vendor&&<div style={{fontSize:11,color:"#6B7094"}}>{alt.vendor}</div>}</div>{alt.annualCost&&<div style={{fontFamily:"monospace",fontSize:12,color:"#F59E0B"}}>${parseFloat(alt.annualCost).toLocaleString()}/yr</div>}</div>{alt.notes&&<div style={{fontSize:12,color:"#9CA3C0",marginTop:6}}>{alt.notes}</div>}</div>))}</div>)}
+                {detail.alternatives?.filter(a=>a.name).length>0&&(<div className="card" style={{padding:20}}>
+                  <div className="sec">Alternatives</div>
+                  {detail.alternatives.filter(a=>a.name).map((alt,i)=>(<div key={i} className="alt-card"><div style={{display:"flex",justifyContent:"space-between"}}><div><div style={{fontWeight:500,fontSize:13}}>{alt.name}</div>{alt.vendor&&<div style={{fontSize:11,color:"#6B7094"}}>{alt.vendor}</div>}</div>{alt.annualCost&&<div style={{fontFamily:"monospace",fontSize:12,color:"#F59E0B"}}>${parseFloat(alt.annualCost).toLocaleString()}/yr</div>}</div>{alt.notes&&<div style={{fontSize:12,color:"#9CA3C0",marginTop:6}}>{alt.notes}</div>}</div>))}
+                </div>)}
               </div>
               <div>
-                <div className="card" style={{padding:20,marginBottom:14}}>
-                  <div className="sec">Approval Actions</div>
-                  <textarea className="inp" rows={3} placeholder="Add a note…" value={approvalNote} onChange={e=>setApprovalNote(e.target.value)} style={{marginBottom:10,resize:"none"}}/>
-                  <div style={{display:"flex",flexDirection:"column",gap:7}}>
-                    {detail.status!=="approved"&&<button className="btn" style={{background:"#10B981",color:"white",padding:9,fontSize:13}} onClick={()=>updateStatus(detail.id,"approved",approvalNote)}>✓ Approve</button>}
-                    {detail.status!=="rejected"&&<button className="btn" style={{background:"#EF4444",color:"white",padding:9,fontSize:13}} onClick={()=>updateStatus(detail.id,"rejected",approvalNote)}>✕ Reject</button>}
-                    {detail.status==="pending"&&<button className="btn" style={{background:"#6366F1",color:"white",padding:9,fontSize:13}} onClick={()=>updateStatus(detail.id,"under-review",approvalNote)}>🔍 Move to Review</button>}
+                {detail.status==="manager-review"&&(
+                  <div className="card" style={{padding:20,marginBottom:14}}>
+                    <div className="sec">Manager Approval Pending</div>
+                    <p style={{fontSize:12,color:"#6B7094",marginBottom:12,lineHeight:1.6}}>Waiting for <strong style={{color:"#E8EAF0"}}>{detail.managerName}</strong> to approve via email link.</p>
+                    <button className="btn" style={{background:"#6366F1",color:"white",padding:"9px",fontSize:13,width:"100%"}} onClick={()=>setEmailModal(detail)}>📧 Resend Approval Email</button>
                   </div>
-                </div>
+                )}
+                {detail.status==="procurement-review"&&(
+                  <div className="card" style={{padding:20,marginBottom:14}}>
+                    <div className="sec">Procurement Decision</div>
+                    <div style={{background:"#1E3A2F",padding:"8px 12px",borderRadius:8,fontSize:12,color:"#10B981",marginBottom:12}}>✓ Manager approved this request</div>
+                    <textarea className="inp" rows={3} placeholder="Add a note…" value={approvalNote} onChange={e=>setApprovalNote(e.target.value)} style={{marginBottom:10,resize:"none"}}/>
+                    <div style={{display:"flex",flexDirection:"column",gap:7}}>
+                      <button className="btn" style={{background:"#10B981",color:"white",padding:9,fontSize:13}} onClick={()=>procurementAction(detail.id,true,approvalNote)}>✓ Final Approve</button>
+                      <button className="btn" style={{background:"#EF4444",color:"white",padding:9,fontSize:13}} onClick={()=>procurementAction(detail.id,false,approvalNote)}>✕ Reject</button>
+                    </div>
+                  </div>
+                )}
+                {(detail.status==="approved"||detail.status==="manager-rejected"||detail.status==="rejected")&&(
+                  <div className="card" style={{padding:20,marginBottom:14}}>
+                    <div className="sec">Final Status</div>
+                    <span className="badge" style={{background:STATUS_CONFIG[detail.status]?.bg,color:STATUS_CONFIG[detail.status]?.color,padding:"8px 14px",fontSize:13}}>
+                      <span style={{width:8,height:8,borderRadius:"50%",background:STATUS_CONFIG[detail.status]?.dot}}/>{STATUS_CONFIG[detail.status]?.label}
+                    </span>
+                    <p style={{fontSize:12,color:"#6B7094",marginTop:10}}>{detail.status==="approved"?"This request has been fully approved.":"This request was rejected and stored for records."}</p>
+                  </div>
+                )}
                 <div className="card" style={{padding:20}}>
                   <div className="sec">Audit Trail</div>
                   {(detail.auditLog||[]).slice().reverse().map((log,i)=>(
-                    <div key={i} className="audit-item"><div className="audit-dot" style={{background:log.action==="Approved"?"#10B981":log.action==="Rejected"?"#EF4444":log.action==="Submitted"?"#6366F1":"#F59E0B"}}/>
+                    <div key={i} className="audit-item"><div className="audit-dot" style={{background:log.action?.includes("Approved")?"#10B981":log.action?.includes("Rejected")?"#EF4444":log.action==="Submitted"?"#6366F1":"#F59E0B"}}/>
                     <div style={{flex:1}}><div style={{display:"flex",justifyContent:"space-between"}}><span style={{fontWeight:500,fontSize:13}}>{log.action}</span><span style={{fontSize:10,color:"#4B5268"}}>{formatDate(log.at)}</span></div><div style={{fontSize:11,color:"#6B7094"}}>by {log.by}</div>{log.note&&<div style={{fontSize:11,color:"#9CA3C0",marginTop:3,fontStyle:"italic"}}>"{log.note}"</div>}</div></div>
                   ))}
                 </div>
@@ -284,14 +560,22 @@ function App() {
         {/* SUBMIT */}
         {view==="submit"&&(
           <div style={{maxWidth:720}}>
-            <div style={{marginBottom:24}}><h1 style={{fontSize:24,fontWeight:600,color:"#F0F2FA"}}>New Tool Request</h1><p style={{fontSize:13,color:"#6B7094",marginTop:3}}>Saved permanently to Firebase</p></div>
+            <div style={{marginBottom:24}}><h1 style={{fontSize:24,fontWeight:600,color:"#F0F2FA"}}>New Tool Request</h1><p style={{fontSize:13,color:"#6B7094",marginTop:3}}>After submitting, an approval email will be sent to your manager</p></div>
             <div className="card" style={{padding:24,marginBottom:16}}>
-              <div className="sec">Requester Information</div>
+              <div className="sec">Your Information</div>
               <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:14}}>
                 <div><label>Full Name *</label><input className="inp" placeholder="Jane Smith" value={form.submitterName} onChange={e=>setForm({...form,submitterName:e.target.value})}/></div>
                 <div><label>Email</label><input className="inp" placeholder="jane@company.com" value={form.submitterEmail} onChange={e=>setForm({...form,submitterEmail:e.target.value})}/></div>
                 <div><label>Department</label><input className="inp" placeholder="e.g. Engineering" value={form.department} onChange={e=>setForm({...form,department:e.target.value})}/></div>
               </div>
+            </div>
+            <div className="card" style={{padding:24,marginBottom:16,border:"1px solid #6366F130"}}>
+              <div className="sec" style={{color:"#6366F1"}}>👤 Manager Details (for approval)</div>
+              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:14}}>
+                <div><label>Manager Name *</label><input className="inp" placeholder="John Doe" value={form.managerName} onChange={e=>setForm({...form,managerName:e.target.value})}/></div>
+                <div><label>Manager Email *</label><input className="inp" placeholder="john@company.com" value={form.managerEmail} onChange={e=>setForm({...form,managerEmail:e.target.value})}/></div>
+              </div>
+              <div style={{marginTop:10,fontSize:12,color:"#6B7094",background:"#1A1D27",padding:"8px 12px",borderRadius:8}}>📧 After you submit, you'll get an email draft to forward to your manager with an approval link.</div>
             </div>
             <div className="card" style={{padding:24,marginBottom:16}}>
               <div className="sec">Tool Details</div>
@@ -328,7 +612,7 @@ function App() {
             </div>
             <div style={{display:"flex",gap:10,alignItems:"center"}}>
               <button className="btn" style={{background:"#6366F1",color:"white",padding:"11px 24px",fontSize:14,display:"flex",alignItems:"center",gap:8,opacity:saving?0.7:1}} onClick={submitForm} disabled={saving}>
-                {saving&&<span className="spinner"/>}{saving?"Saving…":"Submit Request →"}
+                {saving&&<span className="spinner"/>}{saving?"Saving…":"Submit & Send to Manager →"}
               </button>
               <button className="btn" style={{background:"#1A1D27",color:"#6B7094",padding:"11px 18px",fontSize:14}} onClick={()=>{setForm(initialForm);setView("dashboard");}}>Cancel</button>
             </div>
@@ -345,7 +629,7 @@ function App() {
                   <div style={{width:140,flexShrink:0,background:"#0F1117",padding:18}}><div style={{fontSize:10,fontWeight:600,color:"#4B5268",textTransform:"uppercase",letterSpacing:"0.08em"}}>Criteria</div></div>
                   {compareList.map(s=><div key={s.id} style={{flex:1,padding:18,borderLeft:"1px solid #252836"}}><div style={{fontWeight:600,fontSize:14}}>{s.toolName}</div><div style={{fontSize:11,color:"#6B7094",marginBottom:6}}>{s.toolVendor}</div><span className="badge" style={{background:STATUS_CONFIG[s.status]?.bg,color:STATUS_CONFIG[s.status]?.color}}><span style={{width:5,height:5,borderRadius:"50%",background:STATUS_CONFIG[s.status]?.dot}}/>{STATUS_CONFIG[s.status]?.label}</span></div>)}
                 </div>
-                {[["Annual Cost",s=>`$${parseFloat(s.annualCost||0).toLocaleString()}`],["Seats",s=>s.seats||"—"],["Category",s=>s.toolCategory],["Department",s=>s.department||"—"],["Urgency",s=>(s.urgency||"normal").charAt(0).toUpperCase()+(s.urgency||"").slice(1)],["Submitted By",s=>s.submitterName],["Alternatives",s=>`${s.alternatives?.filter(a=>a.name).length||0} listed`],["Date",s=>formatDate(s.submittedAt)]].map(([label,fn])=>(
+                {[["Annual Cost",s=>`$${parseFloat(s.annualCost||0).toLocaleString()}`],["Seats",s=>s.seats||"—"],["Category",s=>s.toolCategory],["Department",s=>s.department||"—"],["Manager",s=>s.managerName||"—"],["Urgency",s=>(s.urgency||"normal").charAt(0).toUpperCase()+(s.urgency||"").slice(1)],["Submitted By",s=>s.submitterName],["Date",s=>formatDate(s.submittedAt)]].map(([label,fn])=>(
                   <div key={label} style={{display:"flex",borderBottom:"1px solid #1A1D27"}}>
                     <div style={{width:140,flexShrink:0,background:"#0F1117",padding:"12px 18px",display:"flex",alignItems:"center"}}><span style={{fontSize:11,fontWeight:600,color:"#4B5268",textTransform:"uppercase",letterSpacing:"0.06em"}}>{label}</span></div>
                     {compareList.map(s=><div key={s.id} style={{flex:1,padding:"12px 18px",borderLeft:"1px solid #1A1D27",fontSize:13}}>{fn(s)}</div>)}
@@ -360,13 +644,17 @@ function App() {
         {/* AUDIT */}
         {view==="audit"&&(
           <div>
-            <div style={{marginBottom:24}}><h1 style={{fontSize:24,fontWeight:600,color:"#F0F2FA"}}>Audit Trail</h1><p style={{fontSize:13,color:"#6B7094",marginTop:3}}>Stored permanently in Firebase</p></div>
+            <div style={{marginBottom:24}}><h1 style={{fontSize:24,fontWeight:600,color:"#F0F2FA"}}>Audit Trail</h1><p style={{fontSize:13,color:"#6B7094",marginTop:3}}>Complete history of all decisions — stored permanently</p></div>
             {submissions.length===0?(<div className="card" style={{padding:60,textAlign:"center",color:"#4B5268"}}><div style={{fontSize:36,marginBottom:12}}>📋</div><div>No records yet.</div></div>):(
               <div className="card" style={{padding:22}}>
-                {submissions.flatMap(s=>(s.auditLog||[]).map(log=>({...log,toolName:s.toolName}))).sort((a,b)=>new Date(b.at)-new Date(a.at)).map((log,i)=>(
+                {submissions.flatMap(s=>(s.auditLog||[]).map(log=>({...log,toolName:s.toolName,dept:s.department,manager:s.managerName}))).sort((a,b)=>new Date(b.at)-new Date(a.at)).map((log,i)=>(
                   <div key={i} className="audit-item" style={{alignItems:"flex-start"}}>
-                    <div className="audit-dot" style={{background:log.action==="Approved"?"#10B981":log.action==="Rejected"?"#EF4444":log.action==="Submitted"?"#6366F1":"#F59E0B",marginTop:6}}/>
-                    <div style={{flex:1}}><div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}><div><span style={{fontWeight:500,fontSize:13}}>{log.action}</span><span style={{fontSize:12,color:"#6B7094",marginLeft:8}}>— {log.toolName}</span></div><span style={{fontSize:11,color:"#4B5268",whiteSpace:"nowrap",marginLeft:12}}>{formatDate(log.at)}</span></div><div style={{fontSize:11,color:"#6B7094",marginTop:2}}>by {log.by}</div>{log.note&&<div style={{fontSize:11,color:"#9CA3C0",marginTop:3,fontStyle:"italic"}}>"{log.note}"</div>}</div>
+                    <div className="audit-dot" style={{background:log.action?.includes("Approved")?"#10B981":log.action?.includes("Rejected")?"#EF4444":log.action==="Submitted"?"#6366F1":"#F59E0B",marginTop:6}}/>
+                    <div style={{flex:1}}>
+                      <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}><div><span style={{fontWeight:500,fontSize:13}}>{log.action}</span><span style={{fontSize:12,color:"#6B7094",marginLeft:8}}>— {log.toolName}</span><span style={{fontSize:11,color:"#4B5268",marginLeft:6}}>({log.dept})</span></div><span style={{fontSize:11,color:"#4B5268",whiteSpace:"nowrap",marginLeft:12}}>{formatDate(log.at)}</span></div>
+                      <div style={{fontSize:11,color:"#6B7094",marginTop:2}}>by {log.by}{log.manager&&log.by!==log.manager?<span style={{marginLeft:6,color:"#4B5268"}}>· Manager: {log.manager}</span>:null}</div>
+                      {log.note&&<div style={{fontSize:11,color:"#9CA3C0",marginTop:3,fontStyle:"italic"}}>"{log.note}"</div>}
+                    </div>
                   </div>
                 ))}
               </div>
@@ -375,13 +663,25 @@ function App() {
         )}
       </div>
 
+      {/* Email Modal */}
+      {emailModal&&<EmailModal request={emailModal} onClose={()=>setEmailModal(null)}/>}
+
       {toast&&(<div className="toast" style={{background:toast.type==="error"?"#3A1E1E":"#1E3A2F",color:toast.type==="error"?"#EF4444":"#10B981",border:`1px solid ${toast.type==="error"?"#EF444430":"#10B98130"}`}}><span>{toast.type==="error"?"⚠":"✓"}</span>{toast.msg}</div>)}
     </div>
   );
 }
 
+// ── ROUTER: check if this is a manager approval link ─────────
+function Root() {
+  const params = new URLSearchParams(window.location.search);
+  const docId  = params.get("docId");
+  const action = params.get("action");
+  if (docId && action) return <ManagerApprovalPage docId={docId} action={action}/>;
+  return <App/>;
+}
+
 const root = ReactDOM.createRoot(document.getElementById('root'));
-root.render(<App/>);
+root.render(<Root/>);
 </script>
 </body>
 </html>
