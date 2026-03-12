@@ -9,237 +9,191 @@
 <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
 <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
 <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet"/>
 <style>
 *{box-sizing:border-box;margin:0;padding:0;}
 html,body,#root{height:100%;width:100%;}
-body{background:#F4F6FA;color:#1A1D2E;font-family:'Inter','Segoe UI',sans-serif;}
+body{background:#F0F2F8;color:#1C1E2D;font-family:'Inter','Segoe UI',sans-serif;font-size:14px;}
 ::-webkit-scrollbar{width:5px;}
 ::-webkit-scrollbar-track{background:#F0F2F8;}
-::-webkit-scrollbar-thumb{background:#C8CEDD;border-radius:3px;}
+::-webkit-scrollbar-thumb{background:#C8D0E0;border-radius:4px;}
 </style>
 <script>
 const firebaseConfig = {
-  apiKey: "AIzaSyBzZoxoMrQL3GaeneRtGewT9es-PGgEl70",
-  authDomain: "procureiq-7201b.firebaseapp.com",
-  projectId: "procureiq-7201b",
-  storageBucket: "procureiq-7201b.firebasestorage.app",
-  messagingSenderId: "347584685186",
-  appId: "1:347584685186:web:4d576fccf205597f49c09b"
+  apiKey:"AIzaSyBzZoxoMrQL3GaeneRtGewT9es-PGgEl70",
+  authDomain:"procureiq-7201b.firebaseapp.com",
+  projectId:"procureiq-7201b",
+  storageBucket:"procureiq-7201b.firebasestorage.app",
+  messagingSenderId:"347584685186",
+  appId:"1:347584685186:web:4d576fccf205597f49c09b"
 };
 firebase.initializeApp(firebaseConfig);
 const db = firebase.firestore();
-db.settings({ experimentalForceLongPolling: true, merge: true });
+db.settings({experimentalForceLongPolling:true,merge:true});
 </script>
 </head>
 <body>
 <div id="root"></div>
 <script type="text/babel">
-const { useState, useEffect, useRef, useMemo } = React;
+const {useState,useEffect,useRef,useMemo} = React;
 
-// ── CONSTANTS ────────────────────────────────────────────────
+// ─── CONSTANTS ────────────────────────────────────────────────
+const DEPTS = ["Engineering","Finance","HR","Marketing","Operations","IT","Sales","Legal","Design","Procurement","Other"];
+const CATS  = ["Productivity","Security","Analytics","Communication","DevOps","Finance","HR Tools","Design","Other"];
 const ROLES = {
-  employee:    { label:"Employee",        color:"#6366F1", bg:"#EEF2FF", icon:"👤" },
-  manager:     { label:"Manager",         color:"#F59E0B", bg:"#FFFBEB", icon:"👔" },
-  procurement: { label:"Procurement Team",color:"#10B981", bg:"#ECFDF5", icon:"🏢" },
-  admin:       { label:"Admin",           color:"#EF4444", bg:"#FEF2F2", icon:"🔑" },
+  employee:    {label:"Employee",       icon:"👤", color:"#6366F1", bg:"#EEF2FF"},
+  manager:     {label:"Manager",        icon:"👔", color:"#D97706", bg:"#FFFBEB"},
+  procurement: {label:"Procurement",    icon:"🏢", color:"#059669", bg:"#ECFDF5"},
+  admin:       {label:"Admin",          icon:"🔑", color:"#DC2626", bg:"#FEF2F2"},
+};
+const PROC_MSGS = ["Purchased","Not Purchased","In Process","Vendor Pending"];
+const STATUS = {
+  "mgr1-pending":       {label:"Awaiting Manager 1",      c:"#D97706", bg:"#FFFBEB"},
+  "mgr1-rejected":      {label:"Rejected by Manager 1",   c:"#DC2626", bg:"#FEF2F2"},
+  "mgr2-pending":       {label:"Awaiting Manager 2",      c:"#7C3AED", bg:"#F5F3FF"},
+  "mgr2-rejected":      {label:"Rejected by Manager 2",   c:"#DC2626", bg:"#FEF2F2"},
+  "procurement-review": {label:"Awaiting Procurement",    c:"#0284C7", bg:"#F0F9FF"},
+  "approved":           {label:"Approved",                c:"#059669", bg:"#ECFDF5"},
+  "rejected":           {label:"Rejected by Procurement", c:"#991B1B", bg:"#FEF2F2"},
+};
+const LOG_COLORS = {
+  "Created":"#6366F1","Edited":"#D97706","Resubmitted":"#D97706",
+  "Manager 1 Approved":"#059669","Manager 1 Rejected":"#DC2626",
+  "Manager 2 Approved":"#059669","Manager 2 Rejected":"#DC2626",
+  "Procurement Approved":"#059669","Procurement Rejected":"#DC2626",
+  "Status Updated":"#0284C7","Deleted":"#DC2626",
 };
 
-const DEPARTMENTS = ["Engineering","Finance","HR","Marketing","Operations","Procurement","Sales","IT","Legal","Other"];
-const CATEGORIES  = ["Productivity","Security","Analytics","Communication","DevOps","HR Tools","Finance","Design","Other"];
+function toYearly(amt,period){ const n=parseFloat(amt)||0; return period==="monthly"?n*12:n; }
+function toMonthly(amt,period){ const n=parseFloat(amt)||0; return period==="yearly"?+(n/12).toFixed(2):n; }
+function fmtMoney(n){ return "$"+(parseFloat(n)||0).toLocaleString("en-IN"); }
+function nowISO(){ return new Date().toISOString(); }
+function fmtDate(v){
+  if(!v) return "—";
+  try{ const d=v?.toDate?v.toDate():new Date(v); return d.toLocaleDateString("en-IN",{day:"2-digit",month:"short",year:"numeric"}); }catch{ return "—"; }
+}
+function fmtTime(v){
+  if(!v) return "—";
+  try{ const d=v?.toDate?v.toDate():new Date(v); return d.toLocaleTimeString("en-IN",{hour:"2-digit",minute:"2-digit",hour12:true}); }catch{ return "—"; }
+}
+function makeLog(action,user,note=""){
+  const now=new Date();
+  return {
+    action, by:user.name, role:user.role, email:user.email||"", note,
+    at:now.toISOString(),
+    date:now.toLocaleDateString("en-IN",{day:"2-digit",month:"short",year:"numeric"}),
+    time:now.toLocaleTimeString("en-IN",{hour:"2-digit",minute:"2-digit",hour12:true}),
+  };
+}
 
-const PROC_STATUSES = [
-  { value:"purchased",           label:"Purchased",                color:"#10B981" },
-  { value:"in-process",          label:"In Process",               color:"#6366F1" },
-  { value:"not-purchased",       label:"Not Purchased",             color:"#EF4444" },
-  { value:"pending-vendor",      label:"Pending Vendor Confirmation",color:"#F59E0B" },
-];
-
-const STATUS_CFG = {
-  "draft":              { label:"Draft",                  color:"#94A3B8", bg:"#F1F5F9" },
-  "mgr1-pending":       { label:"Awaiting Manager 1",     color:"#F59E0B", bg:"#FFFBEB" },
-  "mgr1-rejected":      { label:"Rejected by Manager 1",  color:"#EF4444", bg:"#FEF2F2" },
-  "mgr2-pending":       { label:"Awaiting Manager 2",     color:"#8B5CF6", bg:"#F5F3FF" },
-  "mgr2-rejected":      { label:"Rejected by Manager 2",  color:"#DC2626", bg:"#FEF2F2" },
-  "procurement-review": { label:"Awaiting Procurement",   color:"#0EA5E9", bg:"#F0F9FF" },
-  "approved":           { label:"Approved",               color:"#10B981", bg:"#ECFDF5" },
-  "rejected":           { label:"Rejected by Procurement",color:"#991B1B", bg:"#FEF2F2" },
+const BLANK_FORM = {
+  toolName:"",toolVendor:"",toolCategory:"Productivity",department:"Engineering",
+  costAmount:"",costPeriod:"monthly",seats:"",urgency:"normal",justification:"",
+  mgr1Name:"",mgr1Email:"",mgr2Name:"",mgr2Email:"",
+  submitterEmail:"",
+  alts:[{name:"",vendor:"",cost:"",reason:""}],
 };
 
-const STEPS = [
-  { key:"submit",      label:"Submitted",   icon:"📝" },
-  { key:"mgr1",        label:"Manager 1",   icon:"👔" },
-  { key:"mgr2",        label:"Manager 2",   icon:"👔" },
-  { key:"procurement", label:"Procurement", icon:"🏢" },
-  { key:"done",        label:"Decision",    icon:"✅" },
-];
-
-function stepIndex(status) {
-  if (!status||status==="draft") return 0;
-  if (status==="mgr1-pending") return 1;
-  if (status==="mgr1-rejected") return 1;
-  if (status==="mgr2-pending") return 2;
-  if (status==="mgr2-rejected") return 2;
-  if (status==="procurement-review") return 3;
-  return 4;
-}
-
-function formatDT(val) {
-  if (!val) return "—";
-  try {
-    const d = val?.toDate ? val.toDate() : new Date(val);
-    return d.toLocaleDateString("en-IN",{day:"2-digit",month:"short",year:"numeric"})
-      + " " + d.toLocaleTimeString("en-IN",{hour:"2-digit",minute:"2-digit"});
-  } catch { return "—"; }
-}
-
-function yearlyEquiv(amount, period) {
-  const n = parseFloat(amount)||0;
-  return period==="monthly" ? n*12 : n;
-}
-
-const initialForm = {
-  toolName:"", toolVendor:"", toolCategory:"Productivity", department:"Engineering",
-  costAmount:"", costPeriod:"monthly",
-  seats:"", justification:"", urgency:"normal",
-  mgr1Name:"", mgr1Email:"",
-  mgr2Name:"", mgr2Email:"",
-  alternatives:[{name:"",vendor:"",cost:"",notes:""}],
-};
-
-// ── GLOBAL CSS ───────────────────────────────────────────────
-const G = `
-  .btn{cursor:pointer;border:none;border-radius:8px;font-family:inherit;font-weight:500;font-size:13px;transition:all 0.15s;display:inline-flex;align-items:center;gap:6px;}
-  .btn:hover{filter:brightness(0.95);transform:translateY(-1px);}
-  .btn:active{transform:translateY(0);}
-  .btn:disabled{opacity:0.6;cursor:not-allowed;transform:none;}
-  .card{background:#fff;border:1px solid #E8EBF4;border-radius:12px;box-shadow:0 1px 4px rgba(0,0,0,0.04);}
-  .inp{background:#fff;border:1.5px solid #DDE1EF;border-radius:8px;padding:9px 13px;color:#1A1D2E;width:100%;font-size:14px;font-family:inherit;outline:none;transition:border-color 0.15s;}
-  .inp:focus{border-color:#6366F1;box-shadow:0 0 0 3px #6366F115;}
-  .inp::placeholder{color:#A0A8C0;}
-  label{font-size:12px;font-weight:600;color:#6B7494;display:block;margin-bottom:5px;text-transform:uppercase;letter-spacing:0.05em;}
-  .badge{display:inline-flex;align-items:center;gap:5px;padding:3px 10px;border-radius:20px;font-size:12px;font-weight:500;}
-  .nav-item{padding:9px 14px;border-radius:9px;cursor:pointer;font-size:13px;font-weight:500;display:flex;align-items:center;gap:10px;color:#6B7494;transition:all 0.15s;}
-  .nav-item:hover{background:#F0F2FA;color:#1A1D2E;}
-  .nav-item.active{background:#EEF2FF;color:#6366F1;font-weight:600;}
-  .tab{padding:6px 14px;border-radius:7px;cursor:pointer;font-size:12px;font-weight:500;transition:all 0.15s;border:1.5px solid transparent;color:#6B7494;}
-  .tab.active{background:#6366F1;color:#fff;border-color:#6366F1;}
-  .tab:not(.active):hover{background:#F0F2FA;color:#1A1D2E;}
-  .row-tr{transition:background 0.1s;cursor:pointer;}
-  .row-tr:hover{background:#F7F8FC!important;}
-  .sec-title{font-size:11px;font-weight:700;color:#A0A8C0;text-transform:uppercase;letter-spacing:0.1em;margin-bottom:12px;}
-  .toast{position:fixed;bottom:24px;right:24px;padding:13px 18px;border-radius:10px;font-size:13px;font-weight:500;z-index:9999;display:flex;align-items:center;gap:8px;box-shadow:0 8px 24px rgba(0,0,0,0.12);animation:tin 0.2s ease;}
-  @keyframes tin{from{transform:translateY(16px);opacity:0}to{transform:translateY(0);opacity:1}}
-  .spinner{width:14px;height:14px;border:2px solid rgba(255,255,255,0.3);border-top-color:#fff;border-radius:50%;animation:sp 0.7s linear infinite;display:inline-block;}
-  @keyframes sp{to{transform:rotate(360deg)}}
-  .modal-bg{position:fixed;inset:0;background:rgba(0,0,0,0.3);z-index:900;display:flex;align-items:center;justify-content:center;padding:20px;}
-  .step-dot{width:30px;height:30px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:600;flex-shrink:0;border:2px solid transparent;}
-  input[type=checkbox]{width:15px;height:15px;accent-color:#6366F1;cursor:pointer;}
-  select.inp{cursor:pointer;}
-  .field-row{display:grid;gap:14px;}
-  .alt-box{background:#F7F8FC;border:1.5px solid #E8EBF4;border-radius:10px;padding:14px;margin-bottom:10px;}
-  .audit-row{display:flex;gap:10px;padding:10px 0;border-bottom:1px solid #F0F2FA;}
-  .billing-tab{padding:8px 20px;border-radius:8px;cursor:pointer;font-size:13px;font-weight:600;border:2px solid #DDE1EF;background:#fff;transition:all 0.15s;}
-  .billing-tab.active{background:#6366F1;color:#fff;border-color:#6366F1;}
+// ─── GLOBAL STYLES ─────────────────────────────────────────────
+const G=`
+.btn{cursor:pointer;border:none;border-radius:8px;font-family:inherit;font-weight:500;font-size:13px;transition:all .15s;display:inline-flex;align-items:center;gap:5px;line-height:1;}
+.btn:hover{filter:brightness(.94);transform:translateY(-1px);}
+.btn:active{transform:none;}
+.btn:disabled{opacity:.55;cursor:not-allowed;transform:none;}
+.card{background:#fff;border:1px solid #E2E6F0;border-radius:12px;box-shadow:0 1px 3px rgba(0,0,0,.05);}
+.inp{background:#fff;border:1.5px solid #D4D9EA;border-radius:8px;padding:9px 12px;color:#1C1E2D;width:100%;font-size:13px;font-family:inherit;outline:none;transition:border .15s;}
+.inp:focus{border-color:#6366F1;box-shadow:0 0 0 3px #6366F118;}
+.inp::placeholder{color:#A8B0C8;}
+select.inp{cursor:pointer;}
+.lbl{font-size:11px;font-weight:700;color:#7B84A0;text-transform:uppercase;letter-spacing:.06em;display:block;margin-bottom:5px;}
+.badge{display:inline-flex;align-items:center;gap:4px;padding:3px 9px;border-radius:20px;font-size:11px;font-weight:600;}
+.nav-li{padding:8px 12px;border-radius:9px;cursor:pointer;font-size:13px;font-weight:500;display:flex;align-items:center;gap:9px;color:#6B7494;transition:all .15s;}
+.nav-li:hover{background:#F0F2FA;color:#1C1E2D;}
+.nav-li.on{background:#EEF2FF;color:#6366F1;font-weight:600;}
+.pill{padding:5px 14px;border-radius:20px;cursor:pointer;font-size:12px;font-weight:600;border:1.5px solid #D4D9EA;background:#fff;transition:all .15s;white-space:nowrap;}
+.pill.on{background:#6366F1;color:#fff;border-color:#6366F1;}
+.pill:not(.on):hover{background:#F0F2FA;}
+.tr{transition:background .1s;cursor:pointer;}
+.tr:hover{background:#F7F8FD!important;}
+.toast{position:fixed;bottom:22px;right:22px;padding:12px 18px;border-radius:10px;font-size:13px;font-weight:500;z-index:9999;display:flex;align-items:center;gap:8px;box-shadow:0 6px 20px rgba(0,0,0,.12);animation:tin .2s ease;}
+@keyframes tin{from{transform:translateY(12px);opacity:0}to{transform:translateY(0);opacity:1}}
+.spin{width:13px;height:13px;border:2px solid rgba(255,255,255,.3);border-top-color:#fff;border-radius:50%;animation:sp .7s linear infinite;display:inline-block;}
+@keyframes sp{to{transform:rotate(360deg)}}
+.overlay{position:fixed;inset:0;background:rgba(30,32,50,.35);z-index:800;display:flex;align-items:center;justify-content:center;padding:16px;}
+.step-con{display:flex;align-items:flex-start;padding:18px 20px;background:#fff;border:1px solid #E2E6F0;border-radius:12px;margin-bottom:18px;}
+.step-dot{width:28px;height:28px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;flex-shrink:0;border:2px solid transparent;position:relative;z-index:1;}
 `;
 
-// ── MANAGER APPROVAL PAGE ────────────────────────────────────
-function ManagerApprovalPage({ docId, level }) {
-  const [req, setReq]   = useState(null);
-  const [loading, setL] = useState(true);
-  const [note, setNote] = useState("");
-  const [done, setDone] = useState(null);
-  const [saving, setSav]= useState(false);
-  const [err, setErr]   = useState(null);
-
+// ─── MANAGER APPROVAL PAGE ─────────────────────────────────────
+function ManagerPage({docId,level}){
+  const [req,setReq]=useState(null);
+  const [note,setNote]=useState("");
+  const [done,setDone]=useState(null);
+  const [saving,setSav]=useState(false);
+  const [err,setErr]=useState(null);
   useEffect(()=>{
     db.collection("procurements").doc(docId).get()
-      .then(d=>{ if(d.exists) setReq({id:d.id,...d.data()}); else setErr("Request not found."); setL(false); })
-      .catch(e=>{ setErr(e.message); setL(false); });
-  },[docId]);
-
-  const expectedStatus = level===1 ? "mgr1-pending" : "mgr2-pending";
-  const mgrName = req ? (level===1 ? req.mgr1Name : req.mgr2Name) : "";
-
-  const decide = async (approved) => {
-    if (!req) return;
-    if (req.status !== expectedStatus) { setErr("This request has already been actioned."); return; }
+      .then(d=>d.exists?setReq({id:d.id,...d.data()}):setErr("Request not found"))
+      .catch(e=>setErr(e.message));
+  },[]);
+  const expected = level===1?"mgr1-pending":"mgr2-pending";
+  const mgrName  = req?(level===1?req.mgr1Name:req.mgr2Name):"";
+  const decide=async(approved)=>{
+    if(!req||req.status!==expected){setErr("Already actioned or wrong stage.");return;}
     setSav(true);
-    const nextStatus = approved
-      ? (level===1 ? "mgr2-pending" : "procurement-review")
-      : (level===1 ? "mgr1-rejected" : "mgr2-rejected");
-    const logEntry = {
-      action: approved ? `Manager ${level} Approved` : `Manager ${level} Rejected`,
-      by: mgrName, role: "manager", at: new Date().toISOString(),
-      date: new Date().toLocaleDateString("en-IN",{day:"2-digit",month:"short",year:"numeric"}),
-      time: new Date().toLocaleTimeString("en-IN",{hour:"2-digit",minute:"2-digit"}),
-      note
-    };
-    try {
-      await db.collection("procurements").doc(docId).update({
-        status: nextStatus,
-        auditLog: firebase.firestore.FieldValue.arrayUnion(logEntry),
-        updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
-      });
-      setDone(approved ? "approved" : "rejected");
-    } catch(e){ setErr(e.message); }
+    const nextStatus=approved?(level===1?"mgr2-pending":"procurement-review"):(level===1?"mgr1-rejected":"mgr2-rejected");
+    const log={action:`Manager ${level} ${approved?"Approved":"Rejected"}`,by:mgrName,role:"manager",email:level===1?req.mgr1Email:req.mgr2Email,note,at:nowISO(),date:fmtDate(new Date()),time:fmtTime(new Date())};
+    try{
+      await db.collection("procurements").doc(docId).update({status:nextStatus,auditLog:firebase.firestore.FieldValue.arrayUnion(log),updatedAt:firebase.firestore.FieldValue.serverTimestamp()});
+      setDone(approved?"approved":"rejected");
+    }catch(e){setErr(e.message);}
     setSav(false);
   };
-
-  const styles = { page:{minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",background:"#F4F6FA",padding:20} };
-
-  if (loading) return <div style={styles.page}><div style={{textAlign:"center",color:"#6B7494"}}><div style={{fontSize:32,marginBottom:10}}>⏳</div>Loading…</div></div>;
-  if (err)     return <div style={styles.page}><div style={{textAlign:"center",color:"#EF4444",maxWidth:400}}><div style={{fontSize:32,marginBottom:10}}>⚠️</div>{err}</div></div>;
-  if (done) return (
-    <div style={styles.page}>
-      <div style={{textAlign:"center",maxWidth:420,background:"#fff",borderRadius:16,padding:40,boxShadow:"0 4px 24px rgba(0,0,0,0.08)"}}>
-        <div style={{fontSize:56,marginBottom:16}}>{done==="approved"?"✅":"❌"}</div>
-        <h2 style={{fontSize:22,fontWeight:700,marginBottom:8}}>{done==="approved"?"Request Approved!":"Request Rejected"}</h2>
-        <p style={{color:"#6B7494",fontSize:14,lineHeight:1.7}}>{done==="approved"
-          ? `You've approved the request for "${req?.toolName}". ${level===1?"It will now go to Manager 2 for review.":"It has been sent to the Procurement team."}`
-          : `You've rejected the request for "${req?.toolName}". The requester will be notified.`}</p>
-        <div style={{marginTop:20,padding:"10px 16px",background:"#F7F8FC",borderRadius:8,fontSize:12,color:"#A0A8C0"}}>You can close this tab.</div>
+  const S={page:{minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",background:"#F0F2F8",padding:20}};
+  if(!req&&!err) return <div style={S.page}><style>{G}</style><div style={{textAlign:"center",color:"#7B84A0"}}>⏳ Loading…</div></div>;
+  if(err)        return <div style={S.page}><style>{G}</style><div style={{textAlign:"center",color:"#DC2626",maxWidth:360}}><div style={{fontSize:32,marginBottom:8}}>⚠️</div>{err}</div></div>;
+  if(done) return(
+    <div style={S.page}><style>{G}</style>
+      <div style={{maxWidth:420,width:"100%",background:"#fff",borderRadius:16,padding:36,boxShadow:"0 4px 24px rgba(0,0,0,.08)",textAlign:"center"}}>
+        <div style={{fontSize:52,marginBottom:14}}>{done==="approved"?"✅":"❌"}</div>
+        <h2 style={{fontSize:20,fontWeight:700,marginBottom:8}}>{done==="approved"?"Approved!":"Rejected"}</h2>
+        <p style={{color:"#7B84A0",fontSize:13,lineHeight:1.7}}>{done==="approved"?(level===1?`Forwarded to Manager 2 for review.`:`Sent to Procurement team.`):`The requester will be notified.`}</p>
+        <div style={{marginTop:18,padding:"8px 14px",background:"#F7F8FC",borderRadius:7,fontSize:12,color:"#A8B0C8"}}>You may close this tab.</div>
       </div>
     </div>
   );
-  if (req.status !== expectedStatus) return (
-    <div style={styles.page}>
-      <div style={{textAlign:"center",maxWidth:420,background:"#fff",borderRadius:16,padding:40,boxShadow:"0 4px 24px rgba(0,0,0,0.08)"}}>
-        <div style={{fontSize:48,marginBottom:12}}>🔒</div>
-        <h2 style={{fontSize:20,fontWeight:700,marginBottom:8}}>Already Actioned</h2>
-        <p style={{color:"#6B7494",fontSize:14}}>Status: <strong>{STATUS_CFG[req.status]?.label}</strong></p>
+  if(req.status!==expected) return(
+    <div style={S.page}><style>{G}</style>
+      <div style={{maxWidth:380,width:"100%",background:"#fff",borderRadius:16,padding:36,textAlign:"center",boxShadow:"0 4px 24px rgba(0,0,0,.08)"}}>
+        <div style={{fontSize:40,marginBottom:10}}>🔒</div>
+        <h2 style={{fontSize:18,fontWeight:700,marginBottom:6}}>Already Actioned</h2>
+        <p style={{color:"#7B84A0",fontSize:13}}>Current status: <strong>{STATUS[req.status]?.label||req.status}</strong></p>
       </div>
     </div>
   );
-
-  const yearly = yearlyEquiv(req.costAmount, req.costPeriod);
-
-  return (
-    <div style={styles.page}>
-      <style>{G}</style>
-      <div style={{maxWidth:540,width:"100%",background:"#fff",borderRadius:16,boxShadow:"0 4px 24px rgba(0,0,0,0.08)",overflow:"hidden"}}>
-        <div style={{background:"linear-gradient(135deg,#6366F1,#8B5CF6)",padding:"24px 28px",color:"#fff"}}>
-          <div style={{fontSize:13,opacity:0.8,marginBottom:4}}>Manager {level} Approval Required</div>
-          <h1 style={{fontSize:20,fontWeight:700}}>ProcureIQ — Review Request</h1>
-          <div style={{marginTop:6,fontSize:13,opacity:0.85}}>Hi {mgrName}, please review and approve or reject below</div>
+  const yearly=toYearly(req.costAmount,req.costPeriod);
+  return(
+    <div style={S.page}><style>{G}</style>
+      <div style={{maxWidth:520,width:"100%",background:"#fff",borderRadius:16,boxShadow:"0 4px 24px rgba(0,0,0,.08)",overflow:"hidden"}}>
+        <div style={{background:"linear-gradient(135deg,#6366F1,#8B5CF6)",padding:"22px 26px",color:"#fff"}}>
+          <div style={{fontSize:12,opacity:.8,marginBottom:3}}>Manager {level} Approval Required · ProcureIQ</div>
+          <h1 style={{fontSize:19,fontWeight:700}}>{req.toolName}</h1>
+          <div style={{fontSize:13,opacity:.85,marginTop:4}}>Hi {mgrName}, please review this request</div>
         </div>
         <div style={{padding:24}}>
-          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:16}}>
-            {[["Tool",req.toolName],["Vendor",req.toolVendor||"—"],["Cost",`$${parseFloat(req.costAmount||0).toLocaleString()} / ${req.costPeriod}`],["Yearly Total",`$${yearly.toLocaleString()}`],["Department",req.department],["Submitted By",req.submitterName||"—"]].map(([k,v])=>(
-              <div key={k} style={{background:"#F7F8FC",padding:"10px 12px",borderRadius:8}}>
-                <div style={{fontSize:10,color:"#A0A8C0",textTransform:"uppercase",letterSpacing:"0.08em",marginBottom:2}}>{k}</div>
-                <div style={{fontSize:13,fontWeight:600,color:"#1A1D2E"}}>{v}</div>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:9,marginBottom:14}}>
+            {[["Vendor",req.toolVendor||"—"],["Department",req.department],["Cost",`${fmtMoney(req.costAmount)} / ${req.costPeriod}`],["Yearly Total",fmtMoney(yearly)],["Submitted By",req.submitterName||"—"],["Seats",req.seats||"—"]].map(([k,v])=>(
+              <div key={k} style={{background:"#F7F8FC",padding:"9px 12px",borderRadius:8}}>
+                <div style={{fontSize:10,color:"#A8B0C8",textTransform:"uppercase",letterSpacing:".06em",marginBottom:2}}>{k}</div>
+                <div style={{fontSize:13,fontWeight:600}}>{v}</div>
               </div>
             ))}
           </div>
-          {req.justification&&<div style={{background:"#F7F8FC",padding:"12px 14px",borderRadius:8,marginBottom:14}}><div style={{fontSize:10,color:"#A0A8C0",textTransform:"uppercase",letterSpacing:"0.08em",marginBottom:4}}>Justification</div><p style={{fontSize:13,color:"#4B5268",lineHeight:1.7}}>{req.justification}</p></div>}
-          <div style={{marginBottom:14}}>
-            <label>Note (optional)</label>
-            <textarea className="inp" rows={2} placeholder="Reason for approval or rejection…" value={note} onChange={e=>setNote(e.target.value)} style={{resize:"none"}}/>
-          </div>
+          {req.justification&&<div style={{background:"#F7F8FC",padding:"10px 13px",borderRadius:8,marginBottom:13,fontSize:13,color:"#4B5268",lineHeight:1.7}}><span style={{fontSize:10,color:"#A8B0C8",textTransform:"uppercase",display:"block",marginBottom:3}}>Justification</span>{req.justification}</div>}
+          <div style={{marginBottom:13}}><label className="lbl">Note (optional)</label><textarea className="inp" rows={2} placeholder="Reason for approval or rejection…" value={note} onChange={e=>setNote(e.target.value)} style={{resize:"none"}}/></div>
           <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
-            <button className="btn" style={{background:"#10B981",color:"#fff",padding:"12px",fontSize:14,justifyContent:"center",opacity:saving?0.7:1}} onClick={()=>decide(true)} disabled={saving}>{saving?<span className="spinner"/>:"✓ Approve"}</button>
-            <button className="btn" style={{background:"#EF4444",color:"#fff",padding:"12px",fontSize:14,justifyContent:"center",opacity:saving?0.7:1}} onClick={()=>decide(false)} disabled={saving}>{saving?<span className="spinner"/>:"✕ Reject"}</button>
+            <button className="btn" style={{background:"#059669",color:"#fff",padding:"12px",justifyContent:"center",fontSize:14,opacity:saving?.7:1}} onClick={()=>decide(true)} disabled={saving}>{saving?<span className="spin"/>:"✓ Approve"}</button>
+            <button className="btn" style={{background:"#DC2626",color:"#fff",padding:"12px",justifyContent:"center",fontSize:14,opacity:saving?.7:1}} onClick={()=>decide(false)} disabled={saving}>{saving?<span className="spin"/>:"✕ Reject"}</button>
           </div>
         </div>
       </div>
@@ -247,73 +201,64 @@ function ManagerApprovalPage({ docId, level }) {
   );
 }
 
-// ── LOGIN SCREEN ─────────────────────────────────────────────
-function LoginScreen({ onLogin }) {
-  const [role, setRole]   = useState("employee");
-  const [name, setName]   = useState("");
-  const [email, setEmail] = useState("");
-  const [err, setErr]     = useState("");
-
-  const go = () => {
-    if (!name.trim()) { setErr("Please enter your name."); return; }
-    if (!email.trim()) { setErr("Please enter your email."); return; }
-    onLogin({ role, name: name.trim(), email: email.trim() });
+// ─── LOGIN ──────────────────────────────────────────────────────
+function Login({onLogin}){
+  const [role,setRole]=useState("employee");
+  const [name,setName]=useState("");
+  const [email,setEmail]=useState("");
+  const [err,setErr]=useState("");
+  const go=()=>{
+    if(!name.trim()){setErr("Name is required.");return;}
+    if(!email.trim()||!email.includes("@")){setErr("Valid email is required.");return;}
+    onLogin({role,name:name.trim(),email:email.trim()});
   };
-
-  return (
-    <div style={{minHeight:"100vh",background:"linear-gradient(135deg,#EEF2FF 0%,#F4F6FA 100%)",display:"flex",alignItems:"center",justifyContent:"center",padding:20}}>
+  return(
+    <div style={{minHeight:"100vh",background:"linear-gradient(135deg,#EEF2FF,#F0F2F8)",display:"flex",alignItems:"center",justifyContent:"center",padding:20}}>
       <style>{G}</style>
       <div style={{width:"100%",maxWidth:440}}>
-        <div style={{textAlign:"center",marginBottom:32}}>
-          <div style={{width:56,height:56,background:"linear-gradient(135deg,#6366F1,#8B5CF6)",borderRadius:14,display:"inline-flex",alignItems:"center",justifyContent:"center",fontSize:26,marginBottom:14,boxShadow:"0 4px 16px #6366F140"}}>⚙</div>
-          <h1 style={{fontSize:26,fontWeight:700,color:"#1A1D2E"}}>ProcureIQ</h1>
-          <p style={{color:"#6B7494",fontSize:14,marginTop:4}}>Procurement Management System</p>
+        <div style={{textAlign:"center",marginBottom:28}}>
+          <div style={{width:52,height:52,background:"linear-gradient(135deg,#6366F1,#8B5CF6)",borderRadius:14,display:"inline-flex",alignItems:"center",justifyContent:"center",fontSize:24,marginBottom:12,boxShadow:"0 4px 14px #6366F145"}}>⚙</div>
+          <h1 style={{fontSize:24,fontWeight:700}}>ProcureIQ</h1>
+          <p style={{color:"#7B84A0",fontSize:13,marginTop:3}}>Procurement Management System</p>
         </div>
-        <div className="card" style={{padding:28}}>
-          <div style={{marginBottom:20}}>
-            <label>Your Name</label>
-            <input className="inp" placeholder="e.g. Subhadra" value={name} onChange={e=>setName(e.target.value)}/>
-          </div>
-          <div style={{marginBottom:20}}>
-            <label>Your Email</label>
-            <input className="inp" type="email" placeholder="you@company.com" value={email} onChange={e=>setEmail(e.target.value)}/>
-          </div>
-          <div style={{marginBottom:20}}>
-            <label>Select Your Role</label>
+        <div className="card" style={{padding:26}}>
+          <div style={{marginBottom:16}}><label className="lbl">Your Name</label><input className="inp" placeholder="Full name" value={name} onChange={e=>setName(e.target.value)} onKeyDown={e=>e.key==="Enter"&&go()}/></div>
+          <div style={{marginBottom:16}}><label className="lbl">Your Email</label><input className="inp" type="email" placeholder="you@company.com" value={email} onChange={e=>setEmail(e.target.value)} onKeyDown={e=>e.key==="Enter"&&go()}/></div>
+          <div style={{marginBottom:18}}>
+            <label className="lbl">Select Role</label>
             <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
-              {Object.entries(ROLES).map(([key,r])=>(
-                <div key={key} onClick={()=>setRole(key)} style={{padding:"12px 14px",border:`2px solid ${role===key?r.color:"#DDE1EF"}`,borderRadius:10,cursor:"pointer",background:role===key?r.bg:"#fff",transition:"all 0.15s"}}>
-                  <div style={{fontSize:18,marginBottom:4}}>{r.icon}</div>
-                  <div style={{fontSize:13,fontWeight:600,color:role===key?r.color:"#1A1D2E"}}>{r.label}</div>
+              {Object.entries(ROLES).map(([k,r])=>(
+                <div key={k} onClick={()=>setRole(k)} style={{padding:"11px 13px",border:`2px solid ${role===k?r.color:"#D4D9EA"}`,borderRadius:10,cursor:"pointer",background:role===k?r.bg:"#fff",transition:"all .15s"}}>
+                  <div style={{fontSize:16,marginBottom:3}}>{r.icon}</div>
+                  <div style={{fontSize:12,fontWeight:700,color:role===k?r.color:"#1C1E2D"}}>{r.label}</div>
                 </div>
               ))}
             </div>
           </div>
-          {err&&<div style={{color:"#EF4444",fontSize:12,marginBottom:12,padding:"8px 12px",background:"#FEF2F2",borderRadius:7}}>{err}</div>}
-          <button className="btn" style={{background:"#6366F1",color:"#fff",padding:"12px",fontSize:14,width:"100%",justifyContent:"center"}} onClick={go}>Enter ProcureIQ →</button>
+          {err&&<div style={{color:"#DC2626",fontSize:12,padding:"7px 11px",background:"#FEF2F2",borderRadius:7,marginBottom:12}}>{err}</div>}
+          <button className="btn" style={{background:"#6366F1",color:"#fff",padding:"11px",width:"100%",justifyContent:"center",fontSize:14}} onClick={go}>Enter ProcureIQ →</button>
         </div>
       </div>
     </div>
   );
 }
 
-// ── APPROVAL STEPPER ─────────────────────────────────────────
-function Stepper({ status }) {
-  const idx = stepIndex(status);
-  const isRejected = status?.includes("rejected");
-  return (
-    <div style={{display:"flex",alignItems:"flex-start",gap:0,marginBottom:20,background:"#fff",border:"1px solid #E8EBF4",borderRadius:12,padding:"16px 20px"}}>
-      {STEPS.map((s,i)=>{
-        const done   = i < idx;
-        const active = i === idx;
-        const reject = isRejected && active;
-        const color  = reject?"#EF4444":done?"#10B981":active?"#6366F1":"#C8CEDD";
-        const bg     = reject?"#FEF2F2":done?"#ECFDF5":active?"#EEF2FF":"#F7F8FC";
-        return (
-          <div key={s.key} style={{flex:1,display:"flex",flexDirection:"column",alignItems:"center",position:"relative"}}>
-            {i<STEPS.length-1&&<div style={{position:"absolute",top:15,left:"50%",width:"100%",height:2,background:done?"#10B981":"#E8EBF4",zIndex:0}}/>}
-            <div className="step-dot" style={{background:bg,borderColor:color,color:color,zIndex:1,fontSize:reject||done?"14px":"13px"}}>{reject?"✕":done?"✓":s.icon}</div>
-            <div style={{fontSize:10,fontWeight:600,color,marginTop:5,textAlign:"center",lineHeight:1.3}}>{s.label}</div>
+// ─── STEPPER ────────────────────────────────────────────────────
+function Stepper({status}){
+  const steps=[{l:"Submitted",i:"📝"},{l:"Manager 1",i:"👔"},{l:"Manager 2",i:"👔"},{l:"Procurement",i:"🏢"},{l:"Decision",i:"✅"}];
+  const idx={"mgr1-pending":1,"mgr1-rejected":1,"mgr2-pending":2,"mgr2-rejected":2,"procurement-review":3,"approved":4,"rejected":4}[status]||0;
+  const rej=status?.includes("rejected");
+  return(
+    <div className="step-con">
+      {steps.map((s,i)=>{
+        const done=i<idx, act=i===idx, bad=rej&&act;
+        const c=bad?"#DC2626":done?"#059669":act?"#6366F1":"#C8D0E0";
+        const bg=bad?"#FEF2F2":done?"#ECFDF5":act?"#EEF2FF":"#F7F8FC";
+        return(
+          <div key={i} style={{flex:1,display:"flex",flexDirection:"column",alignItems:"center",position:"relative"}}>
+            {i<steps.length-1&&<div style={{position:"absolute",top:14,left:"50%",width:"100%",height:2,background:done?"#059669":"#E2E6F0",zIndex:0}}/>}
+            <div className="step-dot" style={{background:bg,borderColor:c,color:c}}>{bad?"✕":done?"✓":s.i}</div>
+            <div style={{fontSize:10,fontWeight:600,color:c,marginTop:5,textAlign:"center",lineHeight:1.3}}>{s.l}</div>
           </div>
         );
       })}
@@ -321,47 +266,27 @@ function Stepper({ status }) {
   );
 }
 
-// ── EMAIL MODAL ──────────────────────────────────────────────
-function EmailModal({ req, level, onClose }) {
-  const appUrl  = window.location.origin + window.location.pathname;
-  const link    = `${appUrl}?docId=${req.id}&level=${level}`;
-  const mgrName = level===1 ? req.mgr1Name : req.mgr2Name;
-  const mgrEmail= level===1 ? req.mgr1Email : req.mgr2Email;
-  const yearly  = yearlyEquiv(req.costAmount, req.costPeriod);
-
-  const body = `Hi ${mgrName},
-
-A procurement request requires your approval (Level ${level}).
-
-TOOL       : ${req.toolName}
-VENDOR     : ${req.toolVendor||"—"}
-DEPARTMENT : ${req.department}
-COST       : $${parseFloat(req.costAmount||0).toLocaleString()} / ${req.costPeriod} ($${yearly.toLocaleString()} / year)
-SUBMITTED BY: ${req.submitterName||"—"}
-JUSTIFICATION: ${req.justification||"—"}
-
-CLICK BELOW TO APPROVE OR REJECT:
-${link}
-
-— ProcureIQ System`;
-
-  const mailto = `mailto:${mgrEmail}?subject=Action Required: Approve "${req.toolName}" — ProcureIQ&body=${encodeURIComponent(body)}`;
-
-  return (
-    <div className="modal-bg" onClick={onClose}>
+// ─── EMAIL MODAL ─────────────────────────────────────────────────
+function EmailModal({req,level,onClose}){
+  const url=window.location.origin+window.location.pathname;
+  const link=`${url}?docId=${req.id}&level=${level}`;
+  const mgrName=level===1?req.mgr1Name:req.mgr2Name;
+  const mgrEmail=level===1?req.mgr1Email:req.mgr2Email;
+  const body=`Hi ${mgrName},\n\nA procurement request needs your approval (Level ${level} of 2).\n\nTOOL       : ${req.toolName}\nVENDOR     : ${req.toolVendor||"—"}\nDEPARTMENT : ${req.department}\nCOST       : ${fmtMoney(req.costAmount)} / ${req.costPeriod}  (${fmtMoney(toYearly(req.costAmount,req.costPeriod))} / year)\nSUBMITTED BY: ${req.submitterName||"—"}\nJUSTIFICATION: ${req.justification||"—"}\n\n━━━━━━━━━━━━━━━━━━━━━\nAPPROVAL LINK:\n${link}\n━━━━━━━━━━━━━━━━━━━━━\n\nClick the link to approve or reject. Your decision is recorded permanently.\n\n— ProcureIQ System`;
+  const mailto=`mailto:${mgrEmail}?subject=Action Required: Approve "${req.toolName}" [Level ${level}] — ProcureIQ&body=${encodeURIComponent(body)}`;
+  return(
+    <div className="overlay" onClick={onClose}>
       <div className="card" style={{width:"100%",maxWidth:520,maxHeight:"90vh",overflow:"auto"}} onClick={e=>e.stopPropagation()}>
-        <div style={{padding:"18px 22px",borderBottom:"1px solid #E8EBF4",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-          <div><div style={{fontWeight:700,fontSize:15}}>📧 Send Approval Email — Manager {level}</div><div style={{fontSize:12,color:"#6B7494",marginTop:2}}>To: {mgrName} ({mgrEmail})</div></div>
-          <button className="btn" style={{background:"#F7F8FC",color:"#6B7494",padding:"6px 10px"}} onClick={onClose}>✕</button>
+        <div style={{padding:"16px 20px",borderBottom:"1px solid #E2E6F0",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+          <div><div style={{fontWeight:700,fontSize:14}}>📧 Approval Email — Manager {level}</div><div style={{fontSize:12,color:"#7B84A0",marginTop:2}}>{mgrName} · {mgrEmail}</div></div>
+          <button className="btn" style={{background:"#F7F8FC",color:"#7B84A0",padding:"5px 9px"}} onClick={onClose}>✕</button>
         </div>
-        <div style={{padding:22}}>
-          <div style={{background:"#F7F8FC",border:"1px solid #E8EBF4",borderRadius:8,padding:14,fontFamily:"monospace",fontSize:12,color:"#4B5268",whiteSpace:"pre-wrap",marginBottom:14,lineHeight:1.7}}>{body}</div>
-          <div style={{background:"#EEF2FF",padding:"10px 14px",borderRadius:8,marginBottom:14,fontSize:12,color:"#6366F1"}}>🔗 <strong>Approval Link:</strong> <span style={{wordBreak:"break-all"}}>{link}</span></div>
+        <div style={{padding:20}}>
+          <pre style={{background:"#F7F8FC",border:"1px solid #E2E6F0",borderRadius:8,padding:13,fontSize:11,color:"#4B5268",whiteSpace:"pre-wrap",lineHeight:1.7,marginBottom:13,fontFamily:"monospace"}}>{body}</pre>
+          <div style={{background:"#EEF2FF",padding:"9px 13px",borderRadius:8,marginBottom:13,fontSize:12,color:"#6366F1",wordBreak:"break-all"}}>🔗 {link}</div>
           <div style={{display:"flex",gap:8}}>
-            <a href={mailto} style={{flex:1,textDecoration:"none"}} target="_blank">
-              <button className="btn" style={{background:"#6366F1",color:"#fff",padding:"10px",fontSize:13,width:"100%",justifyContent:"center"}}>📧 Open in Email Client</button>
-            </a>
-            <button className="btn" style={{background:"#F7F8FC",color:"#6B7494",padding:"10px 14px"}} onClick={()=>navigator.clipboard?.writeText(link).then(()=>alert("Link copied!"))}>📋 Copy</button>
+            <a href={mailto} style={{flex:1,textDecoration:"none"}} target="_blank"><button className="btn" style={{background:"#6366F1",color:"#fff",padding:"10px",width:"100%",justifyContent:"center"}}>📧 Open in Email Client</button></a>
+            <button className="btn" style={{background:"#F7F8FC",color:"#6B7494",padding:"10px 13px"}} onClick={()=>navigator.clipboard?.writeText(link).then(()=>alert("Link copied!"))}>📋</button>
           </div>
         </div>
       </div>
@@ -369,305 +294,316 @@ ${link}
   );
 }
 
-
-// ── COMPARE VIEW COMPONENT ────────────────────────────────────
-function CompareView({ subs }) {
-  const [sel, setSel] = useState([]);
-  const compareList   = subs.filter(s=>sel.includes(s.id));
-  return (
+// ─── TIMELINE ────────────────────────────────────────────────────
+function Timeline({logs}){
+  if(!logs||logs.length===0) return <div style={{color:"#A8B0C8",fontSize:13,padding:"10px 0"}}>No actions yet.</div>;
+  return(
     <div>
-      <div style={{marginBottom:20}}><h1 style={{fontSize:22,fontWeight:700,color:"#1A1D2E"}}>⚖ Compare Tools</h1></div>
-      {subs.length<2?(<div className="card" style={{padding:60,textAlign:"center",color:"#A0A8C0"}}><div style={{fontSize:32,marginBottom:8}}>⚖</div>Need at least 2 requests to compare.</div>):(
-        <div>
-          <div className="card" style={{padding:16,marginBottom:14}}>
-            <div style={{fontSize:13,color:"#6B7494",marginBottom:10}}>Select tools to compare (pick 2+):</div>
-            <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
-              {subs.slice(0,20).map(s=><button key={s.id} className="btn" style={{padding:"6px 12px",background:sel.includes(s.id)?"#EEF2FF":"#F7F8FC",color:sel.includes(s.id)?"#6366F1":"#6B7494",border:`1.5px solid ${sel.includes(s.id)?"#C7D2FE":"#E8EBF4"}`}} onClick={()=>setSel(prev=>prev.includes(s.id)?prev.filter(x=>x!==s.id):[...prev,s.id])}>{s.toolName}</button>)}
+      {[...logs].reverse().map((log,i)=>{
+        const c=LOG_COLORS[log.action]||"#6366F1";
+        return(
+          <div key={i} style={{display:"flex",gap:11,padding:"10px 0",borderBottom:"1px solid #F0F2F8"}}>
+            <div style={{width:8,height:8,borderRadius:"50%",background:c,marginTop:5,flexShrink:0}}/>
+            <div style={{flex:1}}>
+              <div style={{display:"flex",justifyContent:"space-between",flexWrap:"wrap",gap:4,marginBottom:2}}>
+                <span style={{fontWeight:700,fontSize:13,color:c}}>{log.action}</span>
+                <div style={{fontSize:11,color:"#A8B0C8",textAlign:"right",lineHeight:1.4}}>
+                  <div>{log.date}</div><div>{log.time}</div>
+                </div>
+              </div>
+              <div style={{fontSize:12,color:"#6B7494"}}>by <strong>{log.by}</strong> <span style={{color:"#A8B0C8"}}>({log.role})</span></div>
+              {log.email&&<div style={{fontSize:11,color:"#A8B0C8"}}>{log.email}</div>}
+              {log.note&&<div style={{fontSize:12,color:"#7B84A0",fontStyle:"italic",marginTop:3,background:"#F7F8FC",padding:"4px 8px",borderRadius:5}}>"{log.note}"</div>}
             </div>
           </div>
-          {compareList.length>=2&&(
-            <div className="card" style={{overflow:"hidden"}}>
-              <div style={{display:"flex",borderBottom:"1px solid #E8EBF4"}}>
-                <div style={{width:130,flexShrink:0,background:"#F7F8FC",padding:16}}><div style={{fontSize:11,fontWeight:700,color:"#A0A8C0",textTransform:"uppercase"}}>Criteria</div></div>
-                {compareList.map(s=><div key={s.id} style={{flex:1,padding:16,borderLeft:"1px solid #E8EBF4"}}><div style={{fontWeight:700,fontSize:14}}>{s.toolName}</div><div style={{fontSize:11,color:"#A0A8C0"}}>{s.toolVendor}</div></div>)}
-              </div>
-              {[["Cost",s=>`$${parseFloat(s.costAmount||0).toLocaleString()} / ${s.costPeriod}`],["Yearly",s=>`$${yearlyEquiv(s.costAmount,s.costPeriod).toLocaleString()}`],["Dept",s=>s.department],["Category",s=>s.toolCategory],["Seats",s=>s.seats||"—"],["Urgency",s=>s.urgency||"—"],["Status",s=>STATUS_CFG[s.status]?.label||"—"],["Submitted By",s=>s.submitterName||"—"]].map(([lb,fn])=>(
-                <div key={lb} style={{display:"flex",borderBottom:"1px solid #F0F2F8"}}>
-                  <div style={{width:130,flexShrink:0,background:"#F7F8FC",padding:"10px 16px",display:"flex",alignItems:"center"}}><span style={{fontSize:11,fontWeight:700,color:"#A0A8C0",textTransform:"uppercase"}}>{lb}</span></div>
-                  {compareList.map(s=><div key={s.id} style={{flex:1,padding:"10px 16px",borderLeft:"1px solid #F0F2F8",fontSize:13}}>{fn(s)}</div>)}
-                </div>
-              ))}
+        );
+      })}
+    </div>
+  );
+}
+
+// ─── COMPARE VIEW ────────────────────────────────────────────────
+function CompareView({subs}){
+  const [sel,setSel]=useState([]);
+  const list=subs.filter(s=>sel.includes(s.id));
+  const toggle=id=>setSel(p=>p.includes(id)?p.filter(x=>x!==id):[...p,id]);
+  return(
+    <div>
+      <div style={{marginBottom:18}}><h1 style={{fontSize:21,fontWeight:700}}>⚖ Compare Tools</h1></div>
+      <div className="card" style={{padding:16,marginBottom:14}}>
+        <div style={{fontSize:12,color:"#7B84A0",marginBottom:9}}>Select 2 or more tools:</div>
+        <div style={{display:"flex",gap:7,flexWrap:"wrap"}}>
+          {subs.map(s=><button key={s.id} className="btn" style={{padding:"5px 11px",background:sel.includes(s.id)?"#EEF2FF":"#F7F8FC",color:sel.includes(s.id)?"#6366F1":"#6B7494",border:`1.5px solid ${sel.includes(s.id)?"#C7D2FE":"#E2E6F0"}`}} onClick={()=>toggle(s.id)}>{s.toolName}</button>)}
+        </div>
+      </div>
+      {list.length>=2&&(
+        <div className="card" style={{overflow:"hidden"}}>
+          <div style={{display:"flex",borderBottom:"1px solid #E2E6F0"}}>
+            <div style={{width:130,flexShrink:0,background:"#F7F8FC",padding:14}}><div style={{fontSize:10,fontWeight:700,color:"#A8B0C8",textTransform:"uppercase"}}>Criteria</div></div>
+            {list.map(s=><div key={s.id} style={{flex:1,padding:14,borderLeft:"1px solid #E2E6F0"}}><div style={{fontWeight:700,fontSize:13}}>{s.toolName}</div><div style={{fontSize:11,color:"#A8B0C8",marginTop:2}}>{s.toolVendor||"—"}</div></div>)}
+          </div>
+          {[["Cost",s=>`${fmtMoney(s.costAmount)}/${s.costPeriod}`],["Yearly",s=>fmtMoney(toYearly(s.costAmount,s.costPeriod))],["Department",s=>s.department],["Category",s=>s.toolCategory],["Seats",s=>s.seats||"—"],["Urgency",s=>s.urgency||"—"],["Status",s=>STATUS[s.status]?.label||"—"],["Submitted By",s=>s.submitterName||"—"],["Manager 1",s=>s.mgr1Name||"—"],["Manager 2",s=>s.mgr2Name||"—"]].map(([lb,fn])=>(
+            <div key={lb} style={{display:"flex",borderBottom:"1px solid #F0F2F8"}}>
+              <div style={{width:130,flexShrink:0,background:"#F7F8FC",padding:"9px 14px",display:"flex",alignItems:"center"}}><span style={{fontSize:10,fontWeight:700,color:"#A8B0C8",textTransform:"uppercase"}}>{lb}</span></div>
+              {list.map(s=><div key={s.id} style={{flex:1,padding:"9px 14px",borderLeft:"1px solid #F0F2F8",fontSize:13}}>{fn(s)}</div>)}
             </div>
-          )}
+          ))}
         </div>
       )}
     </div>
   );
 }
 
-// ── MAIN APP ─────────────────────────────────────────────────
-function App({ user, onLogout }) {
-  const [view, setView]           = useState("dashboard");
-  const [subs, setSubs]           = useState([]);
-  const [loading, setLoading]     = useState(true);
-  const [form, setForm]           = useState(initialForm);
-  const [editId, setEditId]       = useState(null);
-  const [detailId, setDetailId]   = useState(null);
-  const [filter, setFilter]       = useState("all");
-  const [deptFilter, setDeptFilter] = useState("all");
-  const [billingFilter, setBilling] = useState("all");
-  const [search, setSearch]       = useState("");
-  const [toast, setToast]         = useState(null);
-  const [saving, setSaving]       = useState(false);
-  const [emailModal, setEmailModal]= useState(null);
-  const [procNote, setProcNote]   = useState("");
-  const [procStatus, setProcStatus]= useState("");
-  const [mgrNote, setMgrNote]     = useState("");
-  const [deleteConfirm, setDeleteConfirm] = useState(null);
-  const toastRef = useRef(null);
+// ─── MAIN APP ────────────────────────────────────────────────────
+function App({user,onLogout}){
+  const [view,setView]           = useState("dashboard");
+  const [subs,setSubs]           = useState([]);
+  const [loading,setLoading]     = useState(true);
+  const [form,setForm]           = useState(BLANK_FORM);
+  const [editId,setEditId]       = useState(null);
+  const [detailId,setDetailId]   = useState(null);
+  const [filterSt,setFilterSt]   = useState("all");
+  const [filterDept,setFilterDept]= useState("all");
+  const [filterBill,setFilterBill]= useState("all");
+  const [search,setSearch]       = useState("");
+  const [toast,setToast]         = useState(null);
+  const [saving,setSaving]       = useState(false);
+  const [emailMod,setEmailMod]   = useState(null);
+  const [delConfirm,setDelConf]  = useState(null);
+  const [procMsg,setProcMsg]     = useState("");
+  const [procPerson,setProcPerson]= useState("");
+  const [procNote,setProcNote]   = useState("");
+  const tRef=useRef(null);
 
   useEffect(()=>{
-    const unsub = db.collection("procurements").orderBy("submittedAt","desc")
-      .onSnapshot(snap=>{ setSubs(snap.docs.map(d=>({id:d.id,...d.data()}))); setLoading(false); },
-        err=>{ showToast("DB Error: "+err.message,"error"); setLoading(false); });
-    return ()=>unsub();
+    const unsub=db.collection("procurements").orderBy("submittedAt","desc")
+      .onSnapshot(snap=>{setSubs(snap.docs.map(d=>({id:d.id,...d.data()})));setLoading(false);},
+        err=>{showToast("Firebase error: "+err.message,"error");setLoading(false);});
+    return()=>unsub();
   },[]);
 
-  const showToast = (msg,type="success") => {
+  const showToast=(msg,type="ok")=>{
     setToast({msg,type});
-    clearTimeout(toastRef.current);
-    toastRef.current = setTimeout(()=>setToast(null),4000);
+    clearTimeout(tRef.current);
+    tRef.current=setTimeout(()=>setToast(null),4000);
   };
 
-  const logEntry = (action,note="") => ({
-    action, by:user.name, role:user.role, note,
-    at: new Date().toISOString(),
-    date: new Date().toLocaleDateString("en-IN",{day:"2-digit",month:"short",year:"numeric"}),
-    time: new Date().toLocaleTimeString("en-IN",{hour:"2-digit",minute:"2-digit"}),
-  });
+  const log=(action,note="")=>makeLog(action,user,note);
 
   // ── SUBMIT / EDIT ──
-  const submitForm = async () => {
-    if (!form.toolName||!form.costAmount){showToast("Tool name and cost are required.","error");return;}
-    if (!form.mgr1Name||!form.mgr1Email){showToast("Manager 1 details are required.","error");return;}
-    if (!form.mgr2Name||!form.mgr2Email){showToast("Manager 2 details are required.","error");return;}
+  const submitForm=async()=>{
+    if(!form.toolName||!form.costAmount){showToast("Tool name and cost are required.","error");return;}
+    if(!form.mgr1Name||!form.mgr1Email){showToast("Manager 1 name and email required.","error");return;}
+    if(!form.mgr2Name||!form.mgr2Email){showToast("Manager 2 name and email required.","error");return;}
     setSaving(true);
-    try {
-      if (editId) {
-        const orig = subs.find(s=>s.id===editId);
-        const canEdit = ["mgr1-rejected","mgr2-rejected","rejected","draft"].includes(orig?.status);
-        if (!canEdit){showToast("Cannot edit — request is in active review.","error");setSaving(false);return;}
+    try{
+      if(editId){
+        const orig=subs.find(s=>s.id===editId);
+        const canEdit=!orig?.status||["mgr1-pending","mgr1-rejected","mgr2-rejected","rejected"].includes(orig.status);
+        if(!canEdit){showToast("Cannot edit at this stage.","error");setSaving(false);return;}
+        const isResubmit=orig.status?.includes("rejected");
         await db.collection("procurements").doc(editId).update({
           ...form, status:"mgr1-pending",
-          updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
-          auditLog: firebase.firestore.FieldValue.arrayUnion(logEntry("Edited & Resubmitted","Request updated after rejection")),
+          updatedAt:firebase.firestore.FieldValue.serverTimestamp(),
+          auditLog:firebase.firestore.FieldValue.arrayUnion(log(isResubmit?"Resubmitted":"Edited","Details updated")),
         });
-        setEditId(null); setForm(initialForm); setView("dashboard");
-        showToast("Request updated and resubmitted!");
+        const upd={id:editId,...form,submitterName:user.name};
+        setEditId(null);setForm(BLANK_FORM);setView("dashboard");
+        showToast(isResubmit?"Resubmitted for approval!":"Request updated!");
+        if(isResubmit) setTimeout(()=>setEmailMod({req:upd,level:1}),500);
       } else {
-        const ref = await db.collection("procurements").add({
+        const ref=await db.collection("procurements").add({
           ...form, status:"mgr1-pending",
-          submitterName: user.name, submitterEmail: user.email, submitterRole: user.role,
-          submittedAt: firebase.firestore.FieldValue.serverTimestamp(),
-          auditLog:[logEntry("Request Created","Awaiting Manager 1 approval")],
-          procurementStatus: "",
+          submitterName:user.name, submitterEmail:user.email,
+          submittedAt:firebase.firestore.FieldValue.serverTimestamp(),
+          auditLog:[log("Created","New request submitted")],
+          procurementStatus:"", procurementPerson:"", procurementNote:"",
         });
-        const newDoc = {id:ref.id,...form,submitterName:user.name};
-        setForm(initialForm); setView("dashboard");
+        const newDoc={id:ref.id,...form,submitterName:user.name};
+        setForm(BLANK_FORM);setView("dashboard");
         showToast("Submitted! Send approval email to Manager 1.");
-        setTimeout(()=>setEmailModal({req:newDoc,level:1}),500);
+        setTimeout(()=>setEmailMod({req:newDoc,level:1}),500);
       }
-    } catch(e){showToast("Error: "+e.message,"error");}
+    }catch(e){showToast("Error: "+e.message,"error");}
     setSaving(false);
   };
 
-  const startEdit = (s) => {
-    const canEdit = ["mgr1-rejected","mgr2-rejected","rejected","draft"].includes(s.status);
-    if (!canEdit){showToast("Cannot edit — request is in active review.","error");return;}
-    setForm({
-      toolName:s.toolName||"", toolVendor:s.toolVendor||"", toolCategory:s.toolCategory||"Productivity",
-      department:s.department||"Engineering", costAmount:s.costAmount||"", costPeriod:s.costPeriod||"monthly",
-      seats:s.seats||"", justification:s.justification||"", urgency:s.urgency||"normal",
-      mgr1Name:s.mgr1Name||"", mgr1Email:s.mgr1Email||"",
-      mgr2Name:s.mgr2Name||"", mgr2Email:s.mgr2Email||"",
-      alternatives:s.alternatives||[{name:"",vendor:"",cost:"",notes:""}],
-    });
-    setEditId(s.id); setDetailId(null); setView("submit");
+  const startEdit=(s)=>{
+    const canEdit=["mgr1-pending","mgr1-rejected","mgr2-rejected","rejected"].includes(s.status);
+    if(!canEdit){showToast("Editing not allowed at this stage.","error");return;}
+    setForm({toolName:s.toolName||"",toolVendor:s.toolVendor||"",toolCategory:s.toolCategory||"Productivity",department:s.department||"Engineering",costAmount:s.costAmount||"",costPeriod:s.costPeriod||"monthly",seats:s.seats||"",urgency:s.urgency||"normal",justification:s.justification||"",mgr1Name:s.mgr1Name||"",mgr1Email:s.mgr1Email||"",mgr2Name:s.mgr2Name||"",mgr2Email:s.mgr2Email||"",submitterEmail:s.submitterEmail||"",alts:s.alts||[{name:"",vendor:"",cost:"",reason:""}]});
+    setEditId(s.id);setDetailId(null);setView("submit");
   };
 
-  // ── PROCUREMENT ACTIONS ──
-  const procurementDecide = async (id, approved, note="") => {
-    try {
+  // ── PROCUREMENT DECIDE ──
+  const procDecide=async(id,approved,note="")=>{
+    try{
       await db.collection("procurements").doc(id).update({
-        status: approved?"approved":"rejected",
-        auditLog: firebase.firestore.FieldValue.arrayUnion(logEntry(approved?"Procurement Approved":"Procurement Rejected", note)),
-        updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
+        status:approved?"approved":"rejected",
+        auditLog:firebase.firestore.FieldValue.arrayUnion(log(approved?"Procurement Approved":"Procurement Rejected",note)),
+        updatedAt:firebase.firestore.FieldValue.serverTimestamp(),
       });
-      setProcNote(""); showToast(approved?"✓ Approved!":"Rejected.");
-    } catch(e){showToast("Error: "+e.message,"error");}
+      setProcNote("");showToast(approved?"✓ Approved!":"Rejected.");
+    }catch(e){showToast(e.message,"error");}
   };
 
-  const setProcurementStatus = async (id, status) => {
-    try {
+  // ── SET PROCUREMENT STATUS ──
+  const setProcStatus=async(id,msg,person,note)=>{
+    if(!person.trim()){showToast("Please enter responsible person name.","error");return;}
+    try{
       await db.collection("procurements").doc(id).update({
-        procurementStatus: status,
-        auditLog: firebase.firestore.FieldValue.arrayUnion(logEntry("Procurement Status Updated", status)),
-        updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
+        procurementStatus:msg, procurementPerson:person, procurementNote:note,
+        auditLog:firebase.firestore.FieldValue.arrayUnion(log("Status Updated",`${msg} — by ${person}${note?": "+note:""}`)),
+        updatedAt:firebase.firestore.FieldValue.serverTimestamp(),
       });
-      showToast("Status updated!");
-    } catch(e){showToast("Error: "+e.message,"error");}
+      showToast("Status updated!");setProcMsg("");setProcPerson("");setProcNote("");
+    }catch(e){showToast(e.message,"error");}
   };
 
   // ── DELETE ──
-  const deleteRequest = async (id) => {
-    if (user.role!=="admin"&&user.role!=="procurement"){showToast("You don't have permission to delete.","error");return;}
-    try {
+  const deleteReq=async(id)=>{
+    try{
       await db.collection("procurements").doc(id).delete();
-      setDeleteConfirm(null); setDetailId(null);
-      showToast("Request deleted.");
-    } catch(e){showToast("Error: "+e.message,"error");}
+      setDelConf(null);setDetailId(null);showToast("Deleted.");
+    }catch(e){showToast(e.message,"error");}
   };
 
-  const detail = subs.find(s=>s.id===detailId);
+  const detail=subs.find(s=>s.id===detailId);
+  const canDel  =user.role==="admin"||user.role==="procurement";
+  const canProc =user.role==="procurement"||user.role==="admin";
+  const canEdit2=user.role==="employee"||user.role==="admin";
 
-  const filtered = useMemo(()=> subs
-    .filter(s=>filter==="all"||s.status===filter)
-    .filter(s=>deptFilter==="all"||s.department===deptFilter)
-    .filter(s=>billingFilter==="all"||s.costPeriod===billingFilter)
-    .filter(s=>!search||s.toolName?.toLowerCase().includes(search.toLowerCase())||s.submitterName?.toLowerCase().includes(search.toLowerCase())||s.department?.toLowerCase().includes(search.toLowerCase()))
-  ,[subs,filter,deptFilter,billingFilter,search]);
+  const filtered=useMemo(()=>subs
+    .filter(s=>filterSt==="all"||s.status===filterSt)
+    .filter(s=>filterDept==="all"||s.department===filterDept)
+    .filter(s=>filterBill==="all"||s.costPeriod===filterBill)
+    .filter(s=>!search||[s.toolName,s.submitterName,s.department].some(v=>v?.toLowerCase().includes(search.toLowerCase())))
+  ,[subs,filterSt,filterDept,filterBill,search]);
 
-  const stats = useMemo(()=>({
-    total:      subs.length,
-    mgr1:       subs.filter(s=>s.status==="mgr1-pending").length,
-    mgr2:       subs.filter(s=>s.status==="mgr2-pending").length,
-    procurement:subs.filter(s=>s.status==="procurement-review").length,
-    approved:   subs.filter(s=>s.status==="approved").length,
-    rejected:   subs.filter(s=>s.status?.includes("rejected")).length,
-    yearlyTotal:subs.filter(s=>s.status==="approved").reduce((t,s)=>t+yearlyEquiv(s.costAmount,s.costPeriod),0),
-    byDept:     DEPARTMENTS.reduce((acc,d)=>({...acc,[d]:subs.filter(s=>s.department===d&&s.status==="approved").reduce((t,s)=>t+yearlyEquiv(s.costAmount,s.costPeriod),0)}),{}),
+  const stats=useMemo(()=>({
+    total:subs.length,
+    m1:subs.filter(s=>s.status==="mgr1-pending").length,
+    m2:subs.filter(s=>s.status==="mgr2-pending").length,
+    proc:subs.filter(s=>s.status==="procurement-review").length,
+    approved:subs.filter(s=>s.status==="approved").length,
+    rejected:subs.filter(s=>s.status?.includes("rejected")).length,
+    yearly:subs.filter(s=>s.status==="approved").reduce((t,s)=>t+toYearly(s.costAmount,s.costPeriod),0),
+    byDept:DEPTS.reduce((a,d)=>({...a,[d]:subs.filter(s=>s.department===d&&s.status==="approved").reduce((t,s)=>t+toYearly(s.costAmount,s.costPeriod),0)}),{}),
   }),[subs]);
 
-  const canDelete   = user.role==="admin"||user.role==="procurement";
-  const canApprove  = user.role==="procurement"||user.role==="admin";
-  const isEmployee  = user.role==="employee";
-  const nav = v => { setView(v); setDetailId(null); };
+  const nav=v=>{setView(v);setDetailId(null);};
+  const setF=p=>setForm(f=>({...f,...p}));
 
-  const SF = { // sidebar fixed
-    sidebar:{width:220,background:"#fff",borderRight:"1px solid #E8EBF4",display:"flex",flexDirection:"column",padding:"16px 10px",flexShrink:0,boxShadow:"2px 0 8px rgba(0,0,0,0.03)"},
-    main:{flex:1,overflow:"auto",padding:"24px 28px"},
-  };
-
-  return (
-    <div style={{fontFamily:"'Inter','Segoe UI',sans-serif",background:"#F4F6FA",minHeight:"100vh",display:"flex",height:"100vh",overflow:"hidden"}}>
+  return(
+    <div style={{display:"flex",height:"100vh",overflow:"hidden",fontFamily:"'Inter','Segoe UI',sans-serif",background:"#F0F2F8"}}>
       <style>{G}</style>
 
-      {/* SIDEBAR */}
-      <div style={SF.sidebar}>
-        <div style={{padding:"0 6px 16px",borderBottom:"1px solid #E8EBF4",marginBottom:10}}>
-          <div style={{display:"flex",alignItems:"center",gap:9}}>
-            <div style={{width:32,height:32,background:"linear-gradient(135deg,#6366F1,#8B5CF6)",borderRadius:8,display:"flex",alignItems:"center",justifyContent:"center",fontSize:15}}>⚙</div>
-            <div><div style={{fontSize:13,fontWeight:700,color:"#1A1D2E"}}>ProcureIQ</div><div style={{fontSize:10,color:"#A0A8C0"}}>v2.0</div></div>
+      {/* ── SIDEBAR ── */}
+      <div style={{width:216,background:"#fff",borderRight:"1px solid #E2E6F0",display:"flex",flexDirection:"column",padding:"14px 8px",flexShrink:0}}>
+        <div style={{padding:"0 6px 14px",borderBottom:"1px solid #E2E6F0",marginBottom:8}}>
+          <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:10}}>
+            <div style={{width:30,height:30,background:"linear-gradient(135deg,#6366F1,#8B5CF6)",borderRadius:8,display:"flex",alignItems:"center",justifyContent:"center",fontSize:14}}>⚙</div>
+            <div style={{fontSize:13,fontWeight:700}}>ProcureIQ</div>
           </div>
-          <div style={{marginTop:10,padding:"8px 10px",background:"#F7F8FC",borderRadius:8}}>
+          <div style={{background:"#F7F8FC",borderRadius:8,padding:"8px 10px"}}>
             <div style={{fontSize:11,fontWeight:700,color:ROLES[user.role]?.color}}>{ROLES[user.role]?.icon} {ROLES[user.role]?.label}</div>
-            <div style={{fontSize:12,color:"#1A1D2E",fontWeight:500,marginTop:1}}>{user.name}</div>
-            <div style={{fontSize:11,color:"#A0A8C0"}}>{user.email}</div>
+            <div style={{fontSize:12,fontWeight:600,color:"#1C1E2D",marginTop:1}}>{user.name}</div>
+            <div style={{fontSize:11,color:"#A8B0C8",marginTop:1}}>{user.email}</div>
           </div>
         </div>
         <nav style={{flex:1,display:"flex",flexDirection:"column",gap:2}}>
-          {[["dashboard","📊","Dashboard"],["submit","✚","New Request"],["billing","💳","Billing Tracker"],["audit","📋","Audit Logs"],["compare","⚖","Compare"]].map(([v,ic,lb])=>(
-            (!isEmployee||(v!=="audit")) && (
-            <div key={v} className={`nav-item${view===v?" active":""}`} onClick={()=>nav(v)}>
-              <span>{ic}</span>{lb}
-              {v==="dashboard"&&stats.mgr1>0&&<span style={{marginLeft:"auto",background:"#F59E0B",color:"#fff",borderRadius:10,fontSize:10,padding:"1px 6px",fontWeight:700}}>{stats.mgr1}</span>}
-              {v==="dashboard"&&stats.procurement>0&&<span style={{marginLeft:2,background:"#0EA5E9",color:"#fff",borderRadius:10,fontSize:10,padding:"1px 6px",fontWeight:700}}>{stats.procurement}</span>}
+          {[["dashboard","📊","Dashboard"],["submit","＋","New Request"],["billing","💳","Billing"],["audit","📋","Audit Logs"],["compare","⚖","Compare"]].map(([v,ic,lb])=>(
+            <div key={v} className={`nav-li${view===v?" on":""}`} onClick={()=>nav(v)}>
+              <span style={{fontSize:14,width:18,textAlign:"center"}}>{ic}</span>{lb}
+              {v==="dashboard"&&(stats.m1>0||stats.proc>0)&&<div style={{marginLeft:"auto",display:"flex",gap:3}}>
+                {stats.m1>0&&<span style={{background:"#D97706",color:"#fff",borderRadius:10,fontSize:9,padding:"1px 5px",fontWeight:700}}>{stats.m1}</span>}
+                {stats.m2>0&&<span style={{background:"#7C3AED",color:"#fff",borderRadius:10,fontSize:9,padding:"1px 5px",fontWeight:700}}>{stats.m2}</span>}
+                {stats.proc>0&&<span style={{background:"#0284C7",color:"#fff",borderRadius:10,fontSize:9,padding:"1px 5px",fontWeight:700}}>{stats.proc}</span>}
+              </div>}
             </div>
-            )
           ))}
         </nav>
-        <div style={{borderTop:"1px solid #E8EBF4",paddingTop:12}}>
-          <button className="btn" style={{background:"#FEF2F2",color:"#EF4444",padding:"8px 12px",width:"100%",justifyContent:"center",fontSize:12}} onClick={onLogout}>← Switch Role</button>
+        <div style={{borderTop:"1px solid #E2E6F0",paddingTop:10}}>
+          <button className="btn" style={{background:"#FEF2F2",color:"#DC2626",padding:"8px",width:"100%",justifyContent:"center",fontSize:12}} onClick={onLogout}>← Switch Role</button>
         </div>
       </div>
 
-      {/* MAIN */}
-      <div style={SF.main}>
+      {/* ── CONTENT ── */}
+      <div style={{flex:1,overflow:"auto",padding:"22px 26px"}}>
 
-        {/* ── DASHBOARD ── */}
+        {/* ════ DASHBOARD ════ */}
         {view==="dashboard"&&!detailId&&(
           <div>
-            <div style={{marginBottom:20,display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
-              <div><h1 style={{fontSize:22,fontWeight:700,color:"#1A1D2E"}}>Dashboard</h1><p style={{fontSize:13,color:"#6B7494",marginTop:2}}>Requester → Manager 1 → Manager 2 → Procurement</p></div>
-              <button className="btn" style={{background:"#6366F1",color:"#fff",padding:"9px 16px",fontSize:13}} onClick={()=>nav("submit")}>+ New Request</button>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:18}}>
+              <div><h1 style={{fontSize:21,fontWeight:700}}>Dashboard</h1><p style={{fontSize:12,color:"#7B84A0",marginTop:2}}>Requester → Manager 1 → Manager 2 → Procurement</p></div>
+              <button className="btn" style={{background:"#6366F1",color:"#fff",padding:"9px 15px"}} onClick={()=>nav("submit")}>＋ New Request</button>
             </div>
-
-            {/* Stats */}
-            <div style={{display:"grid",gridTemplateColumns:"repeat(6,1fr)",gap:10,marginBottom:20}}>
-              {[["Total",stats.total,"#6366F1","📁"],["Mgr 1",stats.mgr1,"#F59E0B","👔"],["Mgr 2",stats.mgr2,"#8B5CF6","👔"],["Procurement",stats.procurement,"#0EA5E9","🏢"],["Approved",stats.approved,"#10B981","✓"],["Rejected",stats.rejected,"#EF4444","✕"]].map(([l,v,c,ic])=>(
-                <div key={l} className="card" style={{padding:"14px 16px",borderTop:`3px solid ${c}`}}>
-                  <div style={{fontSize:16,marginBottom:4}}>{ic}</div>
+            {/* stat cards */}
+            <div style={{display:"grid",gridTemplateColumns:"repeat(6,1fr)",gap:10,marginBottom:16}}>
+              {[["Total",stats.total,"#6366F1","📁"],["Mgr 1",stats.m1,"#D97706","👔"],["Mgr 2",stats.m2,"#7C3AED","👔"],["Proc.",stats.proc,"#0284C7","🏢"],["Approved",stats.approved,"#059669","✓"],["Rejected",stats.rejected,"#DC2626","✕"]].map(([l,v,c,ic])=>(
+                <div key={l} className="card" style={{padding:"12px 14px",borderTop:`3px solid ${c}`}}>
+                  <div style={{fontSize:15,marginBottom:3}}>{ic}</div>
                   <div style={{fontSize:22,fontWeight:700,color:c}}>{v}</div>
-                  <div style={{fontSize:11,color:"#A0A8C0",marginTop:1}}>{l}</div>
+                  <div style={{fontSize:10,color:"#A8B0C8",marginTop:1,textTransform:"uppercase",fontWeight:600}}>{l}</div>
                 </div>
               ))}
             </div>
-            <div className="card" style={{padding:"12px 16px",marginBottom:16,display:"flex",gap:16,alignItems:"center",flexWrap:"wrap"}}>
-              <span style={{fontSize:13,color:"#6B7494"}}>💰 Approved yearly spend:</span>
-              <span style={{fontSize:16,fontWeight:700,color:"#10B981"}}>${stats.yearlyTotal.toLocaleString()}</span>
+            <div className="card" style={{padding:"10px 16px",marginBottom:14,display:"flex",gap:14,alignItems:"center"}}>
+              <span style={{fontSize:12,color:"#7B84A0"}}>💰 Total approved yearly spend:</span>
+              <span style={{fontSize:15,fontWeight:700,color:"#059669"}}>{fmtMoney(stats.yearly)}</span>
             </div>
-
-            {/* Filters */}
+            {/* filters */}
             <div className="card" style={{overflow:"hidden"}}>
-              <div style={{padding:"12px 16px",borderBottom:"1px solid #F0F2F8",display:"flex",gap:8,flexWrap:"wrap",alignItems:"center"}}>
-                <input className="inp" style={{width:180}} placeholder="Search tool, person, dept…" value={search} onChange={e=>setSearch(e.target.value)}/>
-                <select className="inp" style={{width:140}} value={deptFilter} onChange={e=>setDeptFilter(e.target.value)}>
+              <div style={{padding:"11px 14px",borderBottom:"1px solid #F0F2F8",display:"flex",gap:8,flexWrap:"wrap",alignItems:"center"}}>
+                <input className="inp" style={{width:170}} placeholder="Search…" value={search} onChange={e=>setSearch(e.target.value)}/>
+                <select className="inp" style={{width:140}} value={filterDept} onChange={e=>setFilterDept(e.target.value)}>
                   <option value="all">All Departments</option>
-                  {DEPARTMENTS.map(d=><option key={d}>{d}</option>)}
+                  {DEPTS.map(d=><option key={d}>{d}</option>)}
                 </select>
-                <select className="inp" style={{width:120}} value={billingFilter} onChange={e=>setBilling(e.target.value)}>
+                <select className="inp" style={{width:120}} value={filterBill} onChange={e=>setFilterBill(e.target.value)}>
                   <option value="all">All Billing</option>
                   <option value="monthly">Monthly</option>
                   <option value="yearly">Yearly</option>
                 </select>
-                <div style={{display:"flex",gap:4,flexWrap:"wrap"}}>
-                  {[["all","All"],["mgr1-pending","Mgr 1"],["mgr2-pending","Mgr 2"],["procurement-review","Procurement"],["approved","Approved"],["mgr1-rejected","Rejected"]].map(([s,l])=>(
-                    <div key={s} className={`tab${filter===s?" active":""}`} onClick={()=>setFilter(s)}>{l}</div>
+                <div style={{display:"flex",gap:5,flexWrap:"wrap"}}>
+                  {[["all","All"],["mgr1-pending","Mgr 1"],["mgr2-pending","Mgr 2"],["procurement-review","Proc."],["approved","Approved"],["mgr1-rejected","Rejected"]].map(([s,l])=>(
+                    <div key={s} className={`pill${filterSt===s?" on":""}`} onClick={()=>setFilterSt(s)}>{l}</div>
                   ))}
                 </div>
               </div>
-              {loading?(<div style={{padding:60,textAlign:"center",color:"#A0A8C0"}}><div style={{fontSize:28,marginBottom:8}}>⏳</div>Connecting…</div>)
-              :filtered.length===0?(<div style={{padding:60,textAlign:"center",color:"#A0A8C0"}}><div style={{fontSize:32,marginBottom:8}}>📭</div><div>No requests found. <span style={{color:"#6366F1",cursor:"pointer"}} onClick={()=>nav("submit")}>Create one →</span></div></div>)
+              {loading?(<div style={{padding:50,textAlign:"center",color:"#A8B0C8"}}><div style={{fontSize:26,marginBottom:6}}>⏳</div>Connecting…</div>)
+              :filtered.length===0?(<div style={{padding:50,textAlign:"center",color:"#A8B0C8"}}><div style={{fontSize:28,marginBottom:6}}>📭</div>No requests. <span style={{color:"#6366F1",cursor:"pointer"}} onClick={()=>nav("submit")}>Create one →</span></div>)
               :(
                 <div style={{overflowX:"auto"}}>
-                  <table style={{width:"100%",borderCollapse:"collapse",minWidth:800}}>
+                  <table style={{width:"100%",borderCollapse:"collapse",minWidth:900}}>
                     <thead><tr style={{background:"#F7F8FC"}}>
-                      {["","Tool","Dept","Cost","Billing","Manager 1","Manager 2","Submitted","Status","Actions"].map((h,i)=>(
-                        <th key={i} style={{padding:"10px 12px",fontSize:10,fontWeight:700,color:"#A0A8C0",textAlign:"left",textTransform:"uppercase",letterSpacing:"0.07em",whiteSpace:"nowrap"}}>{h}</th>
+                      {["Tool","Dept","Cost","Billing","Manager 1","Manager 2","Date","Status","Actions"].map((h,i)=>(
+                        <th key={i} style={{padding:"9px 12px",fontSize:10,fontWeight:700,color:"#A8B0C8",textAlign:"left",textTransform:"uppercase",letterSpacing:".06em",whiteSpace:"nowrap"}}>{h}</th>
                       ))}
                     </tr></thead>
                     <tbody>
                       {filtered.map((s,ri)=>{
-                        const sc = STATUS_CFG[s.status]||STATUS_CFG["draft"];
-                        const yearly = yearlyEquiv(s.costAmount,s.costPeriod);
+                        const sc=STATUS[s.status]||{label:"Draft",c:"#94A3B8",bg:"#F1F5F9"};
                         return(
-                          <tr key={s.id} className="row-tr" style={{borderTop:"1px solid #F0F2F8",background:ri%2===0?"#fff":"#FAFBFE"}} onClick={()=>setDetailId(s.id)}>
-                            <td style={{padding:"10px 8px 10px 12px"}}><input type="checkbox" onClick={e=>e.stopPropagation()}/></td>
-                            <td style={{padding:"10px 12px"}}><div style={{fontWeight:600,fontSize:13,color:"#1A1D2E"}}>{s.toolName}</div><div style={{fontSize:11,color:"#A0A8C0"}}>{s.toolVendor}</div></td>
-                            <td style={{padding:"10px 12px",fontSize:12,color:"#6B7494"}}>{s.department}</td>
-                            <td style={{padding:"10px 12px",fontFamily:"monospace",fontSize:12,fontWeight:600,color:"#1A1D2E"}}>${parseFloat(s.costAmount||0).toLocaleString()}<div style={{fontSize:10,color:"#A0A8C0"}}>${yearly.toLocaleString()}/yr</div></td>
-                            <td style={{padding:"10px 12px"}}><span style={{padding:"2px 8px",borderRadius:6,fontSize:11,fontWeight:600,background:s.costPeriod==="monthly"?"#EEF2FF":"#F0FDF4",color:s.costPeriod==="monthly"?"#6366F1":"#10B981"}}>{s.costPeriod==="monthly"?"Monthly":"Yearly"}</span></td>
-                            <td style={{padding:"10px 12px",fontSize:12}}><div style={{fontWeight:500}}>{s.mgr1Name}</div><div style={{fontSize:10,color:"#A0A8C0"}}>{s.mgr1Email}</div></td>
-                            <td style={{padding:"10px 12px",fontSize:12}}><div style={{fontWeight:500}}>{s.mgr2Name}</div><div style={{fontSize:10,color:"#A0A8C0"}}>{s.mgr2Email}</div></td>
-                            <td style={{padding:"10px 12px",fontSize:11,color:"#A0A8C0",whiteSpace:"nowrap"}}>{formatDT(s.submittedAt)}</td>
-                            <td style={{padding:"10px 12px"}}><span className="badge" style={{background:sc.bg,color:sc.color,fontSize:11}}>{sc.label}</span>{s.procurementStatus&&<div style={{fontSize:10,marginTop:3,color:PROC_STATUSES.find(p=>p.value===s.procurementStatus)?.color||"#A0A8C0"}}>{PROC_STATUSES.find(p=>p.value===s.procurementStatus)?.label}</div>}</td>
-                            <td style={{padding:"10px 12px"}} onClick={e=>e.stopPropagation()}>
+                          <tr key={s.id} className="tr" style={{borderTop:"1px solid #F0F2F8",background:ri%2===0?"#fff":"#FAFBFE"}} onClick={()=>setDetailId(s.id)}>
+                            <td style={{padding:"9px 12px"}}><div style={{fontWeight:600,fontSize:13}}>{s.toolName}</div><div style={{fontSize:10,color:"#A8B0C8"}}>{s.submitterName}</div></td>
+                            <td style={{padding:"9px 12px",fontSize:12,color:"#6B7494"}}>{s.department}</td>
+                            <td style={{padding:"9px 12px",fontFamily:"monospace",fontSize:12,fontWeight:600}}>{fmtMoney(s.costAmount)}<div style={{fontSize:10,color:"#A8B0C8"}}>{fmtMoney(toYearly(s.costAmount,s.costPeriod))}/yr</div></td>
+                            <td style={{padding:"9px 12px"}}><span style={{padding:"2px 7px",borderRadius:5,fontSize:10,fontWeight:700,background:s.costPeriod==="monthly"?"#EEF2FF":"#ECFDF5",color:s.costPeriod==="monthly"?"#6366F1":"#059669"}}>{s.costPeriod==="monthly"?"Monthly":"Yearly"}</span></td>
+                            <td style={{padding:"9px 12px",fontSize:11}}><div style={{fontWeight:500}}>{s.mgr1Name}</div><div style={{color:"#A8B0C8",fontSize:10}}>{s.mgr1Email}</div></td>
+                            <td style={{padding:"9px 12px",fontSize:11}}><div style={{fontWeight:500}}>{s.mgr2Name}</div><div style={{color:"#A8B0C8",fontSize:10}}>{s.mgr2Email}</div></td>
+                            <td style={{padding:"9px 12px",fontSize:11,color:"#A8B0C8",whiteSpace:"nowrap"}}><div>{fmtDate(s.submittedAt)}</div><div>{fmtTime(s.submittedAt)}</div></td>
+                            <td style={{padding:"9px 12px"}}>
+                              <span className="badge" style={{background:sc.bg,color:sc.c}}>{sc.label}</span>
+                              {s.procurementStatus&&<div style={{fontSize:10,color:"#059669",marginTop:3,fontWeight:600}}>📦 {s.procurementStatus}</div>}
+                            </td>
+                            <td style={{padding:"9px 12px"}} onClick={e=>e.stopPropagation()}>
                               <div style={{display:"flex",gap:4,flexWrap:"wrap"}}>
-                                {s.status==="mgr1-pending"&&<button className="btn" style={{background:"#EEF2FF",color:"#6366F1",padding:"4px 8px",fontSize:11}} onClick={()=>setEmailModal({req:s,level:1})}>📧 Mgr1</button>}
-                                {s.status==="mgr2-pending"&&<button className="btn" style={{background:"#F5F3FF",color:"#8B5CF6",padding:"4px 8px",fontSize:11}} onClick={()=>setEmailModal({req:s,level:2})}>📧 Mgr2</button>}
-                                {canApprove&&s.status==="procurement-review"&&<><button className="btn" style={{background:"#ECFDF5",color:"#10B981",padding:"4px 8px",fontSize:11}} onClick={()=>procurementDecide(s.id,true)}>✓</button><button className="btn" style={{background:"#FEF2F2",color:"#EF4444",padding:"4px 8px",fontSize:11}} onClick={()=>procurementDecide(s.id,false)}>✕</button></>}
-                                {(s.status?.includes("rejected"))&&(user.role==="employee"||user.role==="admin")&&<button className="btn" style={{background:"#FFFBEB",color:"#F59E0B",padding:"4px 8px",fontSize:11}} onClick={()=>startEdit(s)}>✏️</button>}
-                                {canDelete&&<button className="btn" style={{background:"#FEF2F2",color:"#EF4444",padding:"4px 8px",fontSize:11}} onClick={()=>setDeleteConfirm(s.id)}>🗑</button>}
+                                {s.status==="mgr1-pending"&&<button className="btn" style={{background:"#EEF2FF",color:"#6366F1",padding:"4px 8px",fontSize:10}} onClick={()=>setEmailMod({req:s,level:1})}>📧 M1</button>}
+                                {s.status==="mgr2-pending"&&<button className="btn" style={{background:"#F5F3FF",color:"#7C3AED",padding:"4px 8px",fontSize:10}} onClick={()=>setEmailMod({req:s,level:2})}>📧 M2</button>}
+                                {canProc&&s.status==="procurement-review"&&<><button className="btn" style={{background:"#ECFDF5",color:"#059669",padding:"4px 7px",fontSize:11}} onClick={()=>procDecide(s.id,true)}>✓</button><button className="btn" style={{background:"#FEF2F2",color:"#DC2626",padding:"4px 7px",fontSize:11}} onClick={()=>procDecide(s.id,false)}>✕</button></>}
+                                {canEdit2&&["mgr1-pending","mgr1-rejected","mgr2-rejected","rejected"].includes(s.status)&&<button className="btn" style={{background:"#FFFBEB",color:"#D97706",padding:"4px 7px",fontSize:11}} onClick={()=>startEdit(s)}>✏️</button>}
+                                {canDel&&<button className="btn" style={{background:"#FEF2F2",color:"#DC2626",padding:"4px 7px",fontSize:11}} onClick={()=>setDelConf(s.id)}>🗑</button>}
                               </div>
                             </td>
                           </tr>
@@ -681,237 +617,231 @@ function App({ user, onLogout }) {
           </div>
         )}
 
-        {/* ── DETAIL ── */}
+        {/* ════ DETAIL ════ */}
         {view==="dashboard"&&detailId&&detail&&(
           <div>
-            <button className="btn" style={{background:"#F7F8FC",color:"#6B7494",padding:"7px 14px",marginBottom:18}} onClick={()=>setDetailId(null)}>← Back</button>
+            <button className="btn" style={{background:"#F7F8FC",color:"#6B7494",padding:"7px 13px",marginBottom:16}} onClick={()=>setDetailId(null)}>← Back to Dashboard</button>
             <Stepper status={detail.status}/>
-            <div style={{display:"grid",gridTemplateColumns:"1fr 310px",gap:16}}>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 300px",gap:14}}>
+              {/* left */}
               <div>
-                <div className="card" style={{padding:22,marginBottom:14}}>
-                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:16}}>
-                    <div><h2 style={{fontSize:20,fontWeight:700,color:"#1A1D2E"}}>{detail.toolName}</h2><div style={{fontSize:13,color:"#6B7494",marginTop:2}}>{detail.toolVendor} · {detail.toolCategory} · {detail.department}</div></div>
-                    <span className="badge" style={{background:STATUS_CFG[detail.status]?.bg,color:STATUS_CFG[detail.status]?.color,padding:"5px 12px"}}>{STATUS_CFG[detail.status]?.label}</span>
+                <div className="card" style={{padding:20,marginBottom:12}}>
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:14}}>
+                    <div><h2 style={{fontSize:19,fontWeight:700}}>{detail.toolName}</h2><div style={{fontSize:12,color:"#7B84A0",marginTop:2}}>{detail.toolVendor||"—"} · {detail.toolCategory} · {detail.department}</div></div>
+                    <span className="badge" style={{background:STATUS[detail.status]?.bg,color:STATUS[detail.status]?.c,padding:"4px 11px",fontSize:12}}>{STATUS[detail.status]?.label||"Draft"}</span>
                   </div>
-                  <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:10,marginBottom:14}}>
-                    {[["Cost",`$${parseFloat(detail.costAmount||0).toLocaleString()} / ${detail.costPeriod}`],["Yearly",`$${yearlyEquiv(detail.costAmount,detail.costPeriod).toLocaleString()}`],["Seats",detail.seats||"—"],["Urgency",(detail.urgency||"normal").toUpperCase()]].map(([k,v])=>(
-                      <div key={k} style={{background:"#F7F8FC",padding:"10px 12px",borderRadius:8}}><div style={{fontSize:10,color:"#A0A8C0",textTransform:"uppercase",marginBottom:2}}>{k}</div><div style={{fontSize:13,fontWeight:600}}>{v}</div></div>
+                  <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:9,marginBottom:12}}>
+                    {[["Cost",`${fmtMoney(detail.costAmount)}/${detail.costPeriod}`],["Yearly",fmtMoney(toYearly(detail.costAmount,detail.costPeriod))],["Seats",detail.seats||"—"],["Urgency",(detail.urgency||"normal").toUpperCase()]].map(([k,v])=>(
+                      <div key={k} style={{background:"#F7F8FC",padding:"9px 11px",borderRadius:8}}><div style={{fontSize:9,color:"#A8B0C8",textTransform:"uppercase",letterSpacing:".06em",marginBottom:2}}>{k}</div><div style={{fontSize:12,fontWeight:700}}>{v}</div></div>
                     ))}
                   </div>
-                  <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:14}}>
-                    <div style={{background:"#F7F8FC",padding:"10px 12px",borderRadius:8}}><div style={{fontSize:10,color:"#A0A8C0",textTransform:"uppercase",marginBottom:3}}>Manager 1</div><div style={{fontWeight:600,fontSize:13}}>{detail.mgr1Name}</div><div style={{fontSize:11,color:"#6B7494"}}>{detail.mgr1Email}</div></div>
-                    <div style={{background:"#F7F8FC",padding:"10px 12px",borderRadius:8}}><div style={{fontSize:10,color:"#A0A8C0",textTransform:"uppercase",marginBottom:3}}>Manager 2</div><div style={{fontWeight:600,fontSize:13}}>{detail.mgr2Name}</div><div style={{fontSize:11,color:"#6B7494"}}>{detail.mgr2Email}</div></div>
+                  <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:9,marginBottom:12}}>
+                    <div style={{background:"#F7F8FC",padding:"9px 11px",borderRadius:8}}><div style={{fontSize:9,color:"#A8B0C8",textTransform:"uppercase",marginBottom:3}}>Manager 1</div><div style={{fontWeight:600,fontSize:12}}>{detail.mgr1Name}</div><div style={{fontSize:11,color:"#7B84A0"}}>{detail.mgr1Email}</div></div>
+                    <div style={{background:"#F7F8FC",padding:"9px 11px",borderRadius:8}}><div style={{fontSize:9,color:"#A8B0C8",textTransform:"uppercase",marginBottom:3}}>Manager 2</div><div style={{fontWeight:600,fontSize:12}}>{detail.mgr2Name}</div><div style={{fontSize:11,color:"#7B84A0"}}>{detail.mgr2Email}</div></div>
                   </div>
-                  {detail.justification&&<div><div style={{fontSize:10,color:"#A0A8C0",textTransform:"uppercase",marginBottom:4}}>Justification</div><p style={{fontSize:13,color:"#4B5268",lineHeight:1.7,background:"#F7F8FC",padding:"10px 12px",borderRadius:8}}>{detail.justification}</p></div>}
-                  <div style={{marginTop:12,fontSize:11,color:"#A0A8C0"}}>By {detail.submitterName} · {formatDT(detail.submittedAt)}</div>
+                  {detail.justification&&<div style={{background:"#F7F8FC",padding:"10px 12px",borderRadius:8,marginBottom:10}}><div style={{fontSize:9,color:"#A8B0C8",textTransform:"uppercase",marginBottom:3}}>Justification</div><p style={{fontSize:13,color:"#4B5268",lineHeight:1.7}}>{detail.justification}</p></div>}
+                  <div style={{fontSize:11,color:"#A8B0C8",marginTop:6}}>Submitted by {detail.submitterName} · {fmtDate(detail.submittedAt)} {fmtTime(detail.submittedAt)}</div>
+                  {detail.procurementStatus&&<div style={{marginTop:12,padding:"10px 13px",background:"#ECFDF5",border:"1px solid #A7F3D0",borderRadius:8}}><div style={{fontSize:9,color:"#059669",textTransform:"uppercase",fontWeight:700,marginBottom:3}}>Procurement Status</div><div style={{fontWeight:700,fontSize:13,color:"#059669"}}>📦 {detail.procurementStatus}</div>{detail.procurementPerson&&<div style={{fontSize:11,color:"#059669",marginTop:1}}>Responsible: {detail.procurementPerson}</div>}{detail.procurementNote&&<div style={{fontSize:11,color:"#6B7494",marginTop:3,fontStyle:"italic"}}>{detail.procurementNote}</div>}</div>}
                 </div>
-                {detail.alternatives?.filter(a=>a.name).length>0&&(
-                  <div className="card" style={{padding:20,marginBottom:14}}>
-                    <div className="sec-title">Alternatives Considered</div>
-                    {detail.alternatives.filter(a=>a.name).map((alt,i)=>(
-                      <div key={i} className="alt-box"><div style={{display:"flex",justifyContent:"space-between"}}><div><div style={{fontWeight:600,fontSize:13}}>{alt.name}</div>{alt.vendor&&<div style={{fontSize:11,color:"#6B7494"}}>{alt.vendor}</div>}</div>{alt.cost&&<div style={{fontWeight:700,color:"#F59E0B",fontFamily:"monospace"}}>${parseFloat(alt.cost).toLocaleString()}</div>}</div>{alt.notes&&<div style={{fontSize:12,color:"#6B7494",marginTop:6}}>{alt.notes}</div>}</div>
+                {detail.alts?.filter(a=>a.name).length>0&&(
+                  <div className="card" style={{padding:18,marginBottom:12}}>
+                    <div style={{fontSize:10,fontWeight:700,color:"#A8B0C8",textTransform:"uppercase",marginBottom:10}}>Alternatives Considered</div>
+                    {detail.alts.filter(a=>a.name).map((a,i)=>(
+                      <div key={i} style={{background:"#F7F8FC",border:"1px solid #E2E6F0",borderRadius:8,padding:12,marginBottom:8}}>
+                        <div style={{display:"flex",justifyContent:"space-between"}}><div><div style={{fontWeight:600,fontSize:13}}>{a.name}</div>{a.vendor&&<div style={{fontSize:11,color:"#7B84A0"}}>{a.vendor}</div>}</div>{a.cost&&<div style={{fontFamily:"monospace",fontSize:12,fontWeight:700,color:"#D97706"}}>{fmtMoney(a.cost)}</div>}</div>
+                        {a.reason&&<div style={{fontSize:12,color:"#7B84A0",marginTop:5}}>{a.reason}</div>}
+                      </div>
                     ))}
                   </div>
                 )}
+                {/* Timeline */}
+                <div className="card" style={{padding:18}}>
+                  <div style={{fontSize:10,fontWeight:700,color:"#A8B0C8",textTransform:"uppercase",marginBottom:10}}>📋 Action Timeline</div>
+                  <Timeline logs={detail.auditLog}/>
+                </div>
               </div>
+              {/* right panel */}
               <div>
-                {/* Manager email buttons */}
-                {detail.status==="mgr1-pending"&&<div className="card" style={{padding:18,marginBottom:12}}>
-                  <div className="sec-title">Manager 1 Pending</div>
-                  <p style={{fontSize:12,color:"#6B7494",marginBottom:10}}>Waiting for <strong>{detail.mgr1Name}</strong></p>
-                  <button className="btn" style={{background:"#EEF2FF",color:"#6366F1",padding:"9px",width:"100%",justifyContent:"center"}} onClick={()=>setEmailModal({req:detail,level:1})}>📧 Send/Resend Email</button>
+                {detail.status==="mgr1-pending"&&<div className="card" style={{padding:16,marginBottom:10}}>
+                  <div style={{fontSize:10,fontWeight:700,color:"#A8B0C8",textTransform:"uppercase",marginBottom:8}}>Manager 1 Pending</div>
+                  <p style={{fontSize:12,color:"#7B84A0",marginBottom:9}}>Waiting for <strong>{detail.mgr1Name}</strong></p>
+                  <button className="btn" style={{background:"#EEF2FF",color:"#6366F1",padding:"9px",width:"100%",justifyContent:"center"}} onClick={()=>setEmailMod({req:detail,level:1})}>📧 Send Approval Email</button>
                 </div>}
-                {detail.status==="mgr2-pending"&&<div className="card" style={{padding:18,marginBottom:12}}>
-                  <div className="sec-title">Manager 2 Pending</div>
-                  <p style={{fontSize:12,color:"#6B7494",marginBottom:10}}>Waiting for <strong>{detail.mgr2Name}</strong></p>
-                  <button className="btn" style={{background:"#F5F3FF",color:"#8B5CF6",padding:"9px",width:"100%",justifyContent:"center"}} onClick={()=>setEmailModal({req:detail,level:2})}>📧 Send/Resend Email</button>
+                {detail.status==="mgr2-pending"&&<div className="card" style={{padding:16,marginBottom:10}}>
+                  <div style={{fontSize:10,fontWeight:700,color:"#A8B0C8",textTransform:"uppercase",marginBottom:8}}>Manager 2 Pending</div>
+                  <p style={{fontSize:12,color:"#7B84A0",marginBottom:9}}>Waiting for <strong>{detail.mgr2Name}</strong></p>
+                  <button className="btn" style={{background:"#F5F3FF",color:"#7C3AED",padding:"9px",width:"100%",justifyContent:"center"}} onClick={()=>setEmailMod({req:detail,level:2})}>📧 Send Approval Email</button>
                 </div>}
-                {/* Procurement actions */}
-                {canApprove&&detail.status==="procurement-review"&&(
-                  <div className="card" style={{padding:18,marginBottom:12}}>
-                    <div className="sec-title">Procurement Decision</div>
-                    <div style={{background:"#ECFDF5",padding:"8px 12px",borderRadius:7,fontSize:12,color:"#10B981",marginBottom:10}}>✓ Both managers approved</div>
+                {canProc&&detail.status==="procurement-review"&&(
+                  <div className="card" style={{padding:16,marginBottom:10}}>
+                    <div style={{fontSize:10,fontWeight:700,color:"#A8B0C8",textTransform:"uppercase",marginBottom:8}}>Procurement Decision</div>
+                    <div style={{background:"#ECFDF5",padding:"7px 10px",borderRadius:7,fontSize:12,color:"#059669",marginBottom:9}}>✓ Both managers approved</div>
                     <textarea className="inp" rows={2} placeholder="Note…" value={procNote} onChange={e=>setProcNote(e.target.value)} style={{marginBottom:8,resize:"none"}}/>
                     <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
-                      <button className="btn" style={{background:"#10B981",color:"#fff",padding:"9px",justifyContent:"center"}} onClick={()=>procurementDecide(detail.id,true,procNote)}>✓ Approve</button>
-                      <button className="btn" style={{background:"#EF4444",color:"#fff",padding:"9px",justifyContent:"center"}} onClick={()=>procurementDecide(detail.id,false,procNote)}>✕ Reject</button>
+                      <button className="btn" style={{background:"#059669",color:"#fff",padding:"9px",justifyContent:"center"}} onClick={()=>procDecide(detail.id,true,procNote)}>✓ Approve</button>
+                      <button className="btn" style={{background:"#DC2626",color:"#fff",padding:"9px",justifyContent:"center"}} onClick={()=>procDecide(detail.id,false,procNote)}>✕ Reject</button>
                     </div>
                   </div>
                 )}
-                {/* Procurement status message */}
-                {canApprove&&detail.status==="approved"&&(
-                  <div className="card" style={{padding:18,marginBottom:12}}>
-                    <div className="sec-title">Procurement Status</div>
-                    <div style={{display:"flex",flexDirection:"column",gap:7}}>
-                      {PROC_STATUSES.map(ps=>(
-                        <button key={ps.value} className="btn" style={{padding:"9px 12px",background:detail.procurementStatus===ps.value?ps.color+"20":"#F7F8FC",color:detail.procurementStatus===ps.value?ps.color:"#6B7494",border:`1.5px solid ${detail.procurementStatus===ps.value?ps.color:"#E8EBF4"}`,justifyContent:"flex-start"}} onClick={()=>setProcurementStatus(detail.id,ps.value)}>
-                          {detail.procurementStatus===ps.value?"✓ ":""}{ps.label}
+                {canProc&&detail.status==="approved"&&(
+                  <div className="card" style={{padding:16,marginBottom:10}}>
+                    <div style={{fontSize:10,fontWeight:700,color:"#A8B0C8",textTransform:"uppercase",marginBottom:8}}>📦 Procurement Status</div>
+                    <div style={{marginBottom:9}}>
+                      {PROC_MSGS.map(m=>(
+                        <button key={m} className="btn" style={{padding:"7px 10px",marginBottom:5,width:"100%",justifyContent:"flex-start",background:detail.procurementStatus===m?"#ECFDF5":"#F7F8FC",color:detail.procurementStatus===m?"#059669":"#6B7494",border:`1.5px solid ${detail.procurementStatus===m?"#A7F3D0":"#E2E6F0"}`}}>
+                          {detail.procurementStatus===m?"✓ ":""}{m}
                         </button>
                       ))}
                     </div>
-                  </div>
-                )}
-                {/* Edit button for rejected */}
-                {detail.status?.includes("rejected")&&(user.role==="employee"||user.role==="admin")&&(
-                  <div className="card" style={{padding:18,marginBottom:12}}>
-                    <div className="sec-title">Request Rejected</div>
-                    <p style={{fontSize:12,color:"#6B7494",marginBottom:10}}>You can edit and resubmit this request.</p>
-                    <button className="btn" style={{background:"#FFFBEB",color:"#F59E0B",padding:"9px",width:"100%",justifyContent:"center",border:"1.5px solid #FDE68A"}} onClick={()=>startEdit(detail)}>✏️ Edit & Resubmit</button>
-                  </div>
-                )}
-                {/* Delete */}
-                {canDelete&&<div className="card" style={{padding:18,marginBottom:12}}>
-                  <div className="sec-title">Admin Actions</div>
-                  <button className="btn" style={{background:"#FEF2F2",color:"#EF4444",padding:"9px",width:"100%",justifyContent:"center",border:"1.5px solid #FECACA"}} onClick={()=>setDeleteConfirm(detail.id)}>🗑 Delete Request</button>
-                </div>}
-                {/* Audit */}
-                <div className="card" style={{padding:18}}>
-                  <div className="sec-title">Audit Log</div>
-                  {(detail.auditLog||[]).slice().reverse().map((log,i)=>(
-                    <div key={i} className="audit-row">
-                      <div style={{width:8,height:8,borderRadius:"50%",marginTop:5,flexShrink:0,background:log.action?.includes("Approved")?"#10B981":log.action?.includes("Rejected")?"#EF4444":log.action?.includes("Edit")?"#F59E0B":"#6366F1"}}/>
-                      <div style={{flex:1}}>
-                        <div style={{display:"flex",justifyContent:"space-between",flexWrap:"wrap",gap:4}}>
-                          <span style={{fontWeight:600,fontSize:12,color:"#1A1D2E"}}>{log.action}</span>
-                          <div style={{fontSize:10,color:"#A0A8C0",textAlign:"right"}}><div>{log.date}</div><div>{log.time}</div></div>
-                        </div>
-                        <div style={{fontSize:11,color:"#6B7494"}}>by {log.by} ({log.role})</div>
-                        {log.note&&<div style={{fontSize:11,color:"#A0A8C0",fontStyle:"italic",marginTop:2}}>"{log.note}"</div>}
-                      </div>
+                    <div style={{marginBottom:7}}><label className="lbl">Status Message</label>
+                      <select className="inp" value={procMsg} onChange={e=>setProcMsg(e.target.value)}>
+                        <option value="">Select status…</option>
+                        {PROC_MSGS.map(m=><option key={m}>{m}</option>)}
+                      </select>
                     </div>
-                  ))}
-                </div>
+                    <div style={{marginBottom:7}}><label className="lbl">Responsible Person *</label><input className="inp" placeholder="Your name" value={procPerson} onChange={e=>setProcPerson(e.target.value)}/></div>
+                    <div style={{marginBottom:9}}><label className="lbl">Note</label><textarea className="inp" rows={2} placeholder="Additional note…" value={procNote} onChange={e=>setProcNote(e.target.value)} style={{resize:"none"}}/></div>
+                    <button className="btn" style={{background:"#6366F1",color:"#fff",padding:"9px",width:"100%",justifyContent:"center"}} onClick={()=>setProcStatus(detail.id,procMsg,procPerson,procNote)} disabled={!procMsg}>Save Status</button>
+                  </div>
+                )}
+                {canEdit2&&["mgr1-pending","mgr1-rejected","mgr2-rejected","rejected"].includes(detail.status)&&(
+                  <div className="card" style={{padding:16,marginBottom:10}}>
+                    <div style={{fontSize:10,fontWeight:700,color:"#A8B0C8",textTransform:"uppercase",marginBottom:8}}>{detail.status.includes("rejected")?"Edit & Resubmit":"Edit Request"}</div>
+                    <button className="btn" style={{background:"#FFFBEB",color:"#D97706",padding:"9px",width:"100%",justifyContent:"center",border:"1.5px solid #FDE68A"}} onClick={()=>startEdit(detail)}>✏️ {detail.status.includes("rejected")?"Edit & Resubmit":"Edit Request"}</button>
+                    {detail.status.includes("rejected")&&<div style={{fontSize:11,color:"#A8B0C8",marginTop:5,textAlign:"center"}}>Editing will restart the approval flow</div>}
+                    {detail.status==="mgr1-pending"&&<div style={{fontSize:11,color:"#A8B0C8",marginTop:5,textAlign:"center"}}>You can edit before manager approves</div>}
+                  </div>
+                )}
+                {canDel&&<div className="card" style={{padding:16,marginBottom:10}}>
+                  <div style={{fontSize:10,fontWeight:700,color:"#A8B0C8",textTransform:"uppercase",marginBottom:8}}>Admin Actions</div>
+                  <button className="btn" style={{background:"#FEF2F2",color:"#DC2626",padding:"9px",width:"100%",justifyContent:"center",border:"1.5px solid #FECACA"}} onClick={()=>setDelConf(detail.id)}>🗑 Delete Request</button>
+                </div>}
               </div>
             </div>
           </div>
         )}
 
-        {/* ── SUBMIT FORM ── */}
+        {/* ════ SUBMIT FORM ════ */}
         {view==="submit"&&(
-          <div style={{maxWidth:740}}>
-            <div style={{marginBottom:20}}>
-              <h1 style={{fontSize:22,fontWeight:700,color:"#1A1D2E"}}>{editId?"✏️ Edit & Resubmit":"New Procurement Request"}</h1>
-              <p style={{fontSize:13,color:"#6B7494",marginTop:3}}>{editId?"Update details and resubmit for approval":"Fill in details — request will go to both managers for approval"}</p>
-              {editId&&<div style={{marginTop:8,display:"inline-block",padding:"6px 12px",background:"#FFFBEB",border:"1.5px solid #FDE68A",borderRadius:7,fontSize:12,color:"#F59E0B"}}>⚠ Editing rejected request — will restart approval flow</div>}
+          <div style={{maxWidth:720}}>
+            <div style={{marginBottom:18}}>
+              <h1 style={{fontSize:21,fontWeight:700}}>{editId?"✏️ Edit Request":"New Procurement Request"}</h1>
+              <p style={{fontSize:12,color:"#7B84A0",marginTop:3}}>{editId?"Update and resubmit — approval flow will restart":"Request goes: You → Manager 1 → Manager 2 → Procurement"}</p>
+              {editId&&<div style={{marginTop:8,display:"inline-block",padding:"5px 11px",background:"#FFFBEB",border:"1.5px solid #FDE68A",borderRadius:7,fontSize:12,color:"#D97706"}}>⚠ Editing will resubmit from Manager 1</div>}
             </div>
-            {/* Manager Details */}
-            <div className="card" style={{padding:22,marginBottom:14,borderTop:"3px solid #6366F1"}}>
-              <div className="sec-title">👔 Manager Approvers</div>
-              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:14,marginBottom:12}}>
-                <div><label>Manager 1 Name *</label><input className="inp" placeholder="First approver name" value={form.mgr1Name} onChange={e=>setForm({...form,mgr1Name:e.target.value})}/></div>
-                <div><label>Manager 1 Email *</label><input className="inp" placeholder="mgr1@company.com" value={form.mgr1Email} onChange={e=>setForm({...form,mgr1Email:e.target.value})}/></div>
+            {/* managers */}
+            <div className="card" style={{padding:20,marginBottom:12,borderTop:"3px solid #6366F1"}}>
+              <div style={{fontSize:10,fontWeight:700,color:"#6366F1",textTransform:"uppercase",marginBottom:12}}>👔 Manager Approvers (Required)</div>
+              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:12}}>
+                <div><label className="lbl">Manager 1 Name *</label><input className="inp" placeholder="First approver" value={form.mgr1Name} onChange={e=>setF({mgr1Name:e.target.value})}/></div>
+                <div><label className="lbl">Manager 1 Email *</label><input className="inp" placeholder="mgr1@company.com" value={form.mgr1Email} onChange={e=>setF({mgr1Email:e.target.value})}/></div>
               </div>
-              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:14}}>
-                <div><label>Manager 2 Name *</label><input className="inp" placeholder="Second approver name" value={form.mgr2Name} onChange={e=>setForm({...form,mgr2Name:e.target.value})}/></div>
-                <div><label>Manager 2 Email *</label><input className="inp" placeholder="mgr2@company.com" value={form.mgr2Email} onChange={e=>setForm({...form,mgr2Email:e.target.value})}/></div>
+              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
+                <div><label className="lbl">Manager 2 Name *</label><input className="inp" placeholder="Second approver" value={form.mgr2Name} onChange={e=>setF({mgr2Name:e.target.value})}/></div>
+                <div><label className="lbl">Manager 2 Email *</label><input className="inp" placeholder="mgr2@company.com" value={form.mgr2Email} onChange={e=>setF({mgr2Email:e.target.value})}/></div>
               </div>
             </div>
-            {/* Tool Details */}
-            <div className="card" style={{padding:22,marginBottom:14}}>
-              <div className="sec-title">🛠 Tool Details</div>
-              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:14,marginBottom:14}}>
-                <div><label>Tool Name *</label><input className="inp" placeholder="e.g. Figma" value={form.toolName} onChange={e=>setForm({...form,toolName:e.target.value})}/></div>
-                <div><label>Vendor</label><input className="inp" placeholder="e.g. Figma Inc." value={form.toolVendor} onChange={e=>setForm({...form,toolVendor:e.target.value})}/></div>
-                <div><label>Category</label><select className="inp" value={form.toolCategory} onChange={e=>setForm({...form,toolCategory:e.target.value})}>{CATEGORIES.map(c=><option key={c}>{c}</option>)}</select></div>
-                <div><label>Department</label><select className="inp" value={form.department} onChange={e=>setForm({...form,department:e.target.value})}>{DEPARTMENTS.map(d=><option key={d}>{d}</option>)}</select></div>
+            {/* tool */}
+            <div className="card" style={{padding:20,marginBottom:12}}>
+              <div style={{fontSize:10,fontWeight:700,color:"#A8B0C8",textTransform:"uppercase",marginBottom:12}}>🛠 Tool Details</div>
+              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:12}}>
+                <div><label className="lbl">Tool Name *</label><input className="inp" placeholder="e.g. Figma" value={form.toolName} onChange={e=>setF({toolName:e.target.value})}/></div>
+                <div><label className="lbl">Vendor</label><input className="inp" placeholder="e.g. Figma Inc." value={form.toolVendor} onChange={e=>setF({toolVendor:e.target.value})}/></div>
+                <div><label className="lbl">Category</label><select className="inp" value={form.toolCategory} onChange={e=>setF({toolCategory:e.target.value})}>{CATS.map(c=><option key={c}>{c}</option>)}</select></div>
+                <div><label className="lbl">Department</label><select className="inp" value={form.department} onChange={e=>setF({department:e.target.value})}>{DEPTS.map(d=><option key={d}>{d}</option>)}</select></div>
               </div>
-              {/* Cost with billing toggle */}
-              <div style={{marginBottom:14}}>
-                <label>Cost & Billing Cycle *</label>
-                <div style={{display:"flex",gap:0,marginBottom:8,width:"fit-content"}}>
-                  <button className="billing-tab" style={{borderRadius:"8px 0 0 8px",background:form.costPeriod==="monthly"?"#6366F1":"#fff",color:form.costPeriod==="monthly"?"#fff":"#6B7494",borderRight:"none"}} onClick={()=>setForm({...form,costPeriod:"monthly"})}>Monthly</button>
-                  <button className="billing-tab" style={{borderRadius:"0 8px 8px 0",background:form.costPeriod==="yearly"?"#6366F1":"#fff",color:form.costPeriod==="yearly"?"#fff":"#6B7494"}} onClick={()=>setForm({...form,costPeriod:"yearly"})}>Yearly</button>
+              {/* billing toggle */}
+              <div style={{marginBottom:12}}>
+                <label className="lbl">Billing Cycle & Cost *</label>
+                <div style={{display:"flex",gap:0,marginBottom:8,width:"fit-content",borderRadius:9,overflow:"hidden",border:"1.5px solid #D4D9EA"}}>
+                  {["monthly","yearly"].map(p=>(
+                    <button key={p} className="btn" style={{padding:"8px 18px",borderRadius:0,background:form.costPeriod===p?"#6366F1":"#fff",color:form.costPeriod===p?"#fff":"#6B7494",border:"none",fontWeight:700,fontSize:12}} onClick={()=>setF({costPeriod:p})}>{p.charAt(0).toUpperCase()+p.slice(1)}</button>
+                  ))}
                 </div>
-                <input className="inp" type="number" placeholder={`Amount in USD (${form.costPeriod})`} value={form.costAmount} onChange={e=>setForm({...form,costAmount:e.target.value})} style={{maxWidth:280}}/>
-                {form.costAmount&&<div style={{fontSize:12,color:"#6B7494",marginTop:5,padding:"6px 10px",background:"#F7F8FC",borderRadius:6,display:"inline-block"}}>
-                  {form.costPeriod==="monthly"?`Yearly total: $${(parseFloat(form.costAmount)*12).toLocaleString()}`:`Monthly equivalent: $${(parseFloat(form.costAmount)/12).toFixed(0).replace(/\B(?=(\d{3})+(?!\d))/g,",")}`}
-                </div>}
+                <input className="inp" type="number" placeholder={`Amount in USD (${form.costPeriod})`} value={form.costAmount} onChange={e=>setF({costAmount:e.target.value})} style={{maxWidth:280}}/>
+                {form.costAmount&&<div style={{marginTop:5,fontSize:12,color:"#7B84A0",background:"#F7F8FC",padding:"5px 10px",borderRadius:6,display:"inline-block"}}>{form.costPeriod==="monthly"?`Yearly total: ${fmtMoney(parseFloat(form.costAmount)*12)}`:`Monthly: ${fmtMoney((parseFloat(form.costAmount)/12).toFixed(2))}`}</div>}
               </div>
-              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:14,marginBottom:14}}>
-                <div><label>Seats / Licenses</label><input className="inp" type="number" placeholder="e.g. 25" value={form.seats} onChange={e=>setForm({...form,seats:e.target.value})}/></div>
-                <div><label>Urgency</label>
-                  <div style={{display:"flex",gap:7,marginTop:2}}>
+              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:12}}>
+                <div><label className="lbl">Seats / Licenses</label><input className="inp" type="number" placeholder="25" value={form.seats} onChange={e=>setF({seats:e.target.value})}/></div>
+                <div><label className="lbl">Urgency</label>
+                  <div style={{display:"flex",gap:6}}>
                     {["low","normal","high"].map(u=>(
-                      <button key={u} className="btn" style={{padding:"8px 14px",background:form.urgency===u?(u==="high"?"#FEF2F2":u==="normal"?"#EEF2FF":"#ECFDF5"):"#F7F8FC",color:form.urgency===u?(u==="high"?"#EF4444":u==="normal"?"#6366F1":"#10B981"):"#6B7494",border:`1.5px solid ${form.urgency===u?(u==="high"?"#FECACA":u==="normal"?"#C7D2FE":"#A7F3D0"):"#E8EBF4"}`}} onClick={()=>setForm({...form,urgency:u})}>{u.charAt(0).toUpperCase()+u.slice(1)}</button>
+                      <button key={u} className="btn" style={{padding:"8px 13px",background:form.urgency===u?(u==="high"?"#FEF2F2":u==="normal"?"#EEF2FF":"#ECFDF5"):"#F7F8FC",color:form.urgency===u?(u==="high"?"#DC2626":u==="normal"?"#6366F1":"#059669"):"#6B7494",border:`1.5px solid ${form.urgency===u?(u==="high"?"#FECACA":u==="normal"?"#C7D2FE":"#A7F3D0"):"#D4D9EA"}`}} onClick={()=>setF({urgency:u})}>{u.charAt(0).toUpperCase()+u.slice(1)}</button>
                     ))}
                   </div>
                 </div>
               </div>
-              <div><label>Business Justification</label><textarea className="inp" rows={3} placeholder="Why is this tool needed?" value={form.justification} onChange={e=>setForm({...form,justification:e.target.value})} style={{resize:"vertical"}}/></div>
+              <div><label className="lbl">Business Justification</label><textarea className="inp" rows={3} placeholder="Why is this tool needed for your department?" value={form.justification} onChange={e=>setF({justification:e.target.value})} style={{resize:"vertical"}}/></div>
             </div>
-            {/* Alternatives */}
-            <div className="card" style={{padding:22,marginBottom:18}}>
-              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
-                <div className="sec-title" style={{marginBottom:0}}>Alternative Tools</div>
-                <button className="btn" style={{background:"#F7F8FC",color:"#6B7494",padding:"5px 10px",fontSize:12}} onClick={()=>setForm({...form,alternatives:[...form.alternatives,{name:"",vendor:"",cost:"",notes:""}]})}>+ Add</button>
+            {/* alternatives */}
+            <div className="card" style={{padding:20,marginBottom:16}}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
+                <div style={{fontSize:10,fontWeight:700,color:"#A8B0C8",textTransform:"uppercase"}}>Alternative Tools Considered</div>
+                <button className="btn" style={{background:"#F7F8FC",color:"#6B7494",padding:"4px 9px",fontSize:11}} onClick={()=>setF({alts:[...form.alts,{name:"",vendor:"",cost:"",reason:""}]})}>+ Add</button>
               </div>
-              {form.alternatives.map((alt,i)=>(
-                <div key={i} className="alt-box">
+              {form.alts.map((alt,i)=>(
+                <div key={i} style={{background:"#F7F8FC",border:"1px solid #E2E6F0",borderRadius:9,padding:12,marginBottom:9}}>
                   <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 100px",gap:10,marginBottom:8}}>
-                    <div><label>Tool</label><input className="inp" placeholder="e.g. Sketch" value={alt.name} onChange={e=>{const a=[...form.alternatives];a[i].name=e.target.value;setForm({...form,alternatives:a});}}/></div>
-                    <div><label>Vendor</label><input className="inp" value={alt.vendor} onChange={e=>{const a=[...form.alternatives];a[i].vendor=e.target.value;setForm({...form,alternatives:a});}}/></div>
-                    <div><label>Cost</label><input className="inp" type="number" placeholder="$" value={alt.cost} onChange={e=>{const a=[...form.alternatives];a[i].cost=e.target.value;setForm({...form,alternatives:a});}}/></div>
+                    <div><label className="lbl">Tool</label><input className="inp" placeholder="e.g. Sketch" value={alt.name} onChange={e=>{const a=[...form.alts];a[i].name=e.target.value;setF({alts:a});}}/></div>
+                    <div><label className="lbl">Vendor</label><input className="inp" value={alt.vendor} onChange={e=>{const a=[...form.alts];a[i].vendor=e.target.value;setF({alts:a});}}/></div>
+                    <div><label className="lbl">Cost</label><input className="inp" type="number" placeholder="$" value={alt.cost} onChange={e=>{const a=[...form.alts];a[i].cost=e.target.value;setF({alts:a});}}/></div>
                   </div>
                   <div style={{display:"flex",gap:8,alignItems:"flex-end"}}>
-                    <div style={{flex:1}}><label>Reason Not Selected</label><input className="inp" placeholder="Why not chosen?" value={alt.notes} onChange={e=>{const a=[...form.alternatives];a[i].notes=e.target.value;setForm({...form,alternatives:a});}}/></div>
-                    {form.alternatives.length>1&&<button className="btn" style={{background:"#FEF2F2",color:"#EF4444",padding:"9px 10px"}} onClick={()=>setForm({...form,alternatives:form.alternatives.filter((_,j)=>j!==i)})}>✕</button>}
+                    <div style={{flex:1}}><label className="lbl">Reason Not Selected</label><input className="inp" placeholder="Why not chosen?" value={alt.reason} onChange={e=>{const a=[...form.alts];a[i].reason=e.target.value;setF({alts:a});}}/></div>
+                    {form.alts.length>1&&<button className="btn" style={{background:"#FEF2F2",color:"#DC2626",padding:"8px 10px"}} onClick={()=>setF({alts:form.alts.filter((_,j)=>j!==i)})}>✕</button>}
                   </div>
                 </div>
               ))}
             </div>
             <div style={{display:"flex",gap:10}}>
-              <button className="btn" style={{background:"#6366F1",color:"#fff",padding:"11px 22px",fontSize:14,opacity:saving?0.7:1}} onClick={submitForm} disabled={saving}>
-                {saving&&<span className="spinner"/>}{saving?"Saving…":editId?"💾 Save & Resubmit":"Submit Request →"}
-              </button>
-              <button className="btn" style={{background:"#F7F8FC",color:"#6B7494",padding:"11px 18px",fontSize:14}} onClick={()=>{setForm(initialForm);setEditId(null);setView("dashboard");}}>Cancel</button>
+              <button className="btn" style={{background:"#6366F1",color:"#fff",padding:"11px 20px",fontSize:14,opacity:saving?.7:1}} onClick={submitForm} disabled={saving}>{saving&&<span className="spin"/>}{saving?"Saving…":editId?"💾 Save & Resubmit":"Submit Request →"}</button>
+              <button className="btn" style={{background:"#F7F8FC",color:"#6B7494",padding:"11px 16px",fontSize:14}} onClick={()=>{setForm(BLANK_FORM);setEditId(null);setView("dashboard");}}>Cancel</button>
             </div>
           </div>
         )}
 
-        {/* ── BILLING TRACKER ── */}
+        {/* ════ BILLING ════ */}
         {view==="billing"&&(
           <div>
-            <div style={{marginBottom:20}}><h1 style={{fontSize:22,fontWeight:700,color:"#1A1D2E"}}>💳 Billing Tracker</h1><p style={{fontSize:13,color:"#6B7494",marginTop:2}}>Track monthly and yearly subscription costs by department</p></div>
-            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:14,marginBottom:20}}>
-              <div className="card" style={{padding:20}}>
-                <div className="sec-title">Monthly Subscriptions</div>
-                {subs.filter(s=>s.costPeriod==="monthly"&&s.status==="approved").length===0?<div style={{color:"#A0A8C0",fontSize:13}}>No approved monthly subscriptions</div>:
-                subs.filter(s=>s.costPeriod==="monthly"&&s.status==="approved").map(s=>(
-                  <div key={s.id} style={{display:"flex",justifyContent:"space-between",padding:"10px 0",borderBottom:"1px solid #F0F2F8",alignItems:"center"}}>
-                    <div><div style={{fontWeight:600,fontSize:13}}>{s.toolName}</div><div style={{fontSize:11,color:"#6B7494"}}>{s.department}</div></div>
-                    <div style={{textAlign:"right"}}><div style={{fontWeight:700,fontFamily:"monospace",color:"#6366F1"}}>${parseFloat(s.costAmount||0).toLocaleString()}/mo</div><div style={{fontSize:10,color:"#A0A8C0"}}>${(parseFloat(s.costAmount||0)*12).toLocaleString()}/yr</div></div>
+            <div style={{marginBottom:18}}><h1 style={{fontSize:21,fontWeight:700}}>💳 Billing Tracker</h1><p style={{fontSize:12,color:"#7B84A0",marginTop:2}}>Track monthly and yearly subscriptions for approved tools</p></div>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:14,marginBottom:16}}>
+              {["monthly","yearly"].map(period=>{
+                const items=subs.filter(s=>s.costPeriod===period&&s.status==="approved");
+                const total=items.reduce((t,s)=>t+parseFloat(s.costAmount||0),0);
+                return(
+                  <div key={period} className="card" style={{padding:18}}>
+                    <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
+                      <div style={{fontSize:10,fontWeight:700,color:"#A8B0C8",textTransform:"uppercase"}}>{period} subscriptions</div>
+                      <span style={{padding:"2px 8px",borderRadius:5,fontSize:10,fontWeight:700,background:period==="monthly"?"#EEF2FF":"#ECFDF5",color:period==="monthly"?"#6366F1":"#059669"}}>{items.length} tools</span>
+                    </div>
+                    {items.length===0?<div style={{color:"#A8B0C8",fontSize:12}}>No approved {period} subscriptions yet.</div>:
+                    items.map(s=>(
+                      <div key={s.id} style={{display:"flex",justifyContent:"space-between",padding:"9px 0",borderBottom:"1px solid #F0F2F8",alignItems:"center"}}>
+                        <div><div style={{fontWeight:600,fontSize:13}}>{s.toolName}</div><div style={{fontSize:11,color:"#7B84A0"}}>{s.department}</div></div>
+                        <div style={{textAlign:"right"}}>
+                          <div style={{fontWeight:700,fontFamily:"monospace",color:period==="monthly"?"#6366F1":"#059669"}}>{fmtMoney(s.costAmount)}/{period==="monthly"?"mo":"yr"}</div>
+                          <div style={{fontSize:10,color:"#A8B0C8"}}>{fmtMoney(period==="monthly"?parseFloat(s.costAmount)*12:parseFloat(s.costAmount)/12)}/{period==="monthly"?"yr":"mo"}</div>
+                        </div>
+                      </div>
+                    ))}
+                    <div style={{marginTop:10,paddingTop:10,borderTop:"2px solid #E2E6F0",display:"flex",justifyContent:"space-between",fontWeight:700}}>
+                      <span style={{fontSize:13}}>Total / {period==="monthly"?"month":"year"}</span>
+                      <span style={{fontFamily:"monospace",color:period==="monthly"?"#6366F1":"#059669"}}>{fmtMoney(total)}</span>
+                    </div>
                   </div>
-                ))}
-                <div style={{marginTop:12,padding:"10px 0",borderTop:"2px solid #E8EBF4",display:"flex",justifyContent:"space-between"}}>
-                  <span style={{fontWeight:700,fontSize:13}}>Total / month</span>
-                  <span style={{fontWeight:700,fontFamily:"monospace",color:"#6366F1"}}>${subs.filter(s=>s.costPeriod==="monthly"&&s.status==="approved").reduce((t,s)=>t+parseFloat(s.costAmount||0),0).toLocaleString()}</span>
-                </div>
-              </div>
-              <div className="card" style={{padding:20}}>
-                <div className="sec-title">Yearly Subscriptions</div>
-                {subs.filter(s=>s.costPeriod==="yearly"&&s.status==="approved").length===0?<div style={{color:"#A0A8C0",fontSize:13}}>No approved yearly subscriptions</div>:
-                subs.filter(s=>s.costPeriod==="yearly"&&s.status==="approved").map(s=>(
-                  <div key={s.id} style={{display:"flex",justifyContent:"space-between",padding:"10px 0",borderBottom:"1px solid #F0F2F8",alignItems:"center"}}>
-                    <div><div style={{fontWeight:600,fontSize:13}}>{s.toolName}</div><div style={{fontSize:11,color:"#6B7494"}}>{s.department}</div></div>
-                    <div style={{textAlign:"right"}}><div style={{fontWeight:700,fontFamily:"monospace",color:"#10B981"}}>${parseFloat(s.costAmount||0).toLocaleString()}/yr</div><div style={{fontSize:10,color:"#A0A8C0"}}>${(parseFloat(s.costAmount||0)/12).toFixed(0)}/mo</div></div>
-                  </div>
-                ))}
-                <div style={{marginTop:12,padding:"10px 0",borderTop:"2px solid #E8EBF4",display:"flex",justifyContent:"space-between"}}>
-                  <span style={{fontWeight:700,fontSize:13}}>Total / year</span>
-                  <span style={{fontWeight:700,fontFamily:"monospace",color:"#10B981"}}>${subs.filter(s=>s.costPeriod==="yearly"&&s.status==="approved").reduce((t,s)=>t+parseFloat(s.costAmount||0),0).toLocaleString()}</span>
-                </div>
-              </div>
+                );
+              })}
             </div>
-            <div className="card" style={{padding:20}}>
-              <div className="sec-title">Spend by Department (Approved Only)</div>
-              {DEPARTMENTS.filter(d=>stats.byDept[d]>0).length===0?<div style={{color:"#A0A8C0",fontSize:13}}>No approved requests yet.</div>:
-              DEPARTMENTS.filter(d=>stats.byDept[d]>0).sort((a,b)=>stats.byDept[b]-stats.byDept[a]).map(dept=>{
-                const val = stats.byDept[dept];
-                const max = Math.max(...Object.values(stats.byDept));
+            <div className="card" style={{padding:18}}>
+              <div style={{fontSize:10,fontWeight:700,color:"#A8B0C8",textTransform:"uppercase",marginBottom:14}}>Approved Yearly Spend by Department</div>
+              {DEPTS.filter(d=>stats.byDept[d]>0).length===0?<div style={{color:"#A8B0C8",fontSize:12}}>No approved requests yet.</div>:
+              DEPTS.filter(d=>stats.byDept[d]>0).sort((a,b)=>stats.byDept[b]-stats.byDept[a]).map(dept=>{
+                const val=stats.byDept[dept];
+                const max=Math.max(...DEPTS.map(d=>stats.byDept[d]));
                 return(
                   <div key={dept} style={{marginBottom:12}}>
-                    <div style={{display:"flex",justifyContent:"space-between",marginBottom:4}}><span style={{fontSize:13,fontWeight:500}}>{dept}</span><span style={{fontFamily:"monospace",fontSize:13,fontWeight:700,color:"#6366F1"}}>${val.toLocaleString()}/yr</span></div>
-                    <div style={{height:6,background:"#F0F2F8",borderRadius:3}}><div style={{height:6,background:"linear-gradient(90deg,#6366F1,#8B5CF6)",borderRadius:3,width:`${(val/max)*100}%`,transition:"width 0.5s"}}></div></div>
+                    <div style={{display:"flex",justifyContent:"space-between",marginBottom:4}}><span style={{fontSize:13,fontWeight:500}}>{dept}</span><span style={{fontFamily:"monospace",fontSize:12,fontWeight:700,color:"#6366F1"}}>{fmtMoney(val)}/yr</span></div>
+                    <div style={{height:5,background:"#F0F2F8",borderRadius:3}}><div style={{height:5,background:"linear-gradient(90deg,#6366F1,#8B5CF6)",borderRadius:3,width:`${max>0?(val/max)*100:0}%`,transition:"width .5s"}}/></div>
                   </div>
                 );
               })}
@@ -919,25 +849,33 @@ function App({ user, onLogout }) {
           </div>
         )}
 
-        {/* ── AUDIT LOGS ── */}
+        {/* ════ AUDIT LOGS ════ */}
         {view==="audit"&&(
           <div>
-            <div style={{marginBottom:20}}><h1 style={{fontSize:22,fontWeight:700,color:"#1A1D2E"}}>📋 Audit Logs</h1><p style={{fontSize:13,color:"#6B7494",marginTop:2}}>Every action with date and time — stored permanently</p></div>
-            {subs.length===0?(<div className="card" style={{padding:60,textAlign:"center",color:"#A0A8C0"}}><div style={{fontSize:32,marginBottom:8}}>📋</div>No records yet.</div>):(
+            <div style={{marginBottom:18}}><h1 style={{fontSize:21,fontWeight:700}}>📋 Audit Logs</h1><p style={{fontSize:12,color:"#7B84A0",marginTop:2}}>Every action recorded with date, time, user and role</p></div>
+            {subs.length===0?(<div className="card" style={{padding:50,textAlign:"center",color:"#A8B0C8"}}><div style={{fontSize:26,marginBottom:6}}>📋</div>No records yet.</div>):(
               <div className="card" style={{overflow:"hidden"}}>
                 <table style={{width:"100%",borderCollapse:"collapse"}}>
-                  <thead><tr style={{background:"#F7F8FC"}}>{["Tool","Action","By (Role)","Date","Time","Note"].map((h,i)=><th key={i} style={{padding:"10px 14px",fontSize:10,fontWeight:700,color:"#A0A8C0",textAlign:"left",textTransform:"uppercase",letterSpacing:"0.07em"}}>{h}</th>)}</tr></thead>
-                  <tbody>
-                    {subs.flatMap(s=>(s.auditLog||[]).map(log=>({...log,toolName:s.toolName,dept:s.department}))).sort((a,b)=>new Date(b.at)-new Date(a.at)).map((log,i)=>(
-                      <tr key={i} style={{borderTop:"1px solid #F0F2F8",background:i%2===0?"#fff":"#FAFBFE"}}>
-                        <td style={{padding:"10px 14px"}}><div style={{fontWeight:600,fontSize:13}}>{log.toolName}</div><div style={{fontSize:11,color:"#A0A8C0"}}>{log.dept}</div></td>
-                        <td style={{padding:"10px 14px"}}><span style={{padding:"3px 8px",borderRadius:6,fontSize:11,fontWeight:600,background:log.action?.includes("Approved")?"#ECFDF5":log.action?.includes("Rejected")?"#FEF2F2":log.action?.includes("Edit")?"#FFFBEB":"#EEF2FF",color:log.action?.includes("Approved")?"#10B981":log.action?.includes("Rejected")?"#EF4444":log.action?.includes("Edit")?"#F59E0B":"#6366F1"}}>{log.action}</span></td>
-                        <td style={{padding:"10px 14px",fontSize:12}}><div style={{fontWeight:500}}>{log.by}</div><div style={{fontSize:11,color:"#A0A8C0"}}>{log.role}</div></td>
-                        <td style={{padding:"10px 14px",fontSize:12,color:"#6B7494",whiteSpace:"nowrap"}}>{log.date||formatDT(log.at)?.split(",")[0]}</td>
-                        <td style={{padding:"10px 14px",fontSize:12,color:"#6B7494",whiteSpace:"nowrap"}}>{log.time||formatDT(log.at)?.split(",")[1]}</td>
-                        <td style={{padding:"10px 14px",fontSize:12,color:"#A0A8C0",fontStyle:"italic"}}>{log.note||"—"}</td>
-                      </tr>
+                  <thead><tr style={{background:"#F7F8FC"}}>
+                    {["Tool","Action","Performed By","Role","Date","Time","Note"].map((h,i)=>(
+                      <th key={i} style={{padding:"9px 13px",fontSize:10,fontWeight:700,color:"#A8B0C8",textAlign:"left",textTransform:"uppercase",letterSpacing:".06em",whiteSpace:"nowrap"}}>{h}</th>
                     ))}
+                  </tr></thead>
+                  <tbody>
+                    {subs.flatMap(s=>(s.auditLog||[]).map(l=>({...l,toolName:s.toolName,dept:s.department}))).sort((a,b)=>new Date(b.at)-new Date(a.at)).map((l,i)=>{
+                      const c=LOG_COLORS[l.action]||"#6366F1";
+                      return(
+                        <tr key={i} style={{borderTop:"1px solid #F0F2F8",background:i%2===0?"#fff":"#FAFBFE"}}>
+                          <td style={{padding:"9px 13px"}}><div style={{fontWeight:600,fontSize:12}}>{l.toolName}</div><div style={{fontSize:10,color:"#A8B0C8"}}>{l.dept}</div></td>
+                          <td style={{padding:"9px 13px"}}><span style={{padding:"2px 8px",borderRadius:6,fontSize:11,fontWeight:700,background:c+"18",color:c}}>{l.action}</span></td>
+                          <td style={{padding:"9px 13px",fontSize:12,fontWeight:500}}>{l.by}</td>
+                          <td style={{padding:"9px 13px",fontSize:11,color:"#7B84A0",textTransform:"capitalize"}}>{l.role}</td>
+                          <td style={{padding:"9px 13px",fontSize:11,color:"#7B84A0",whiteSpace:"nowrap"}}>{l.date}</td>
+                          <td style={{padding:"9px 13px",fontSize:11,color:"#7B84A0",whiteSpace:"nowrap"}}>{l.time}</td>
+                          <td style={{padding:"9px 13px",fontSize:11,color:"#A8B0C8",fontStyle:"italic"}}>{l.note||"—"}</td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>
@@ -945,45 +883,46 @@ function App({ user, onLogout }) {
           </div>
         )}
 
-        {/* ── COMPARE ── */}
+        {/* ════ COMPARE ════ */}
         {view==="compare"&&<CompareView subs={subs}/>}
-      </div>
 
-      {/* Email Modal */}
-      {emailModal&&<EmailModal req={emailModal.req} level={emailModal.level} onClose={()=>setEmailModal(null)}/>}
+      </div>{/* end content */}
 
-      {/* Delete Confirm */}
-      {deleteConfirm&&(
-        <div className="modal-bg" onClick={()=>setDeleteConfirm(null)}>
-          <div className="card" style={{maxWidth:380,width:"100%",padding:28,textAlign:"center"}} onClick={e=>e.stopPropagation()}>
-            <div style={{fontSize:40,marginBottom:12}}>🗑</div>
-            <h3 style={{fontSize:18,fontWeight:700,marginBottom:8}}>Delete Request?</h3>
-            <p style={{fontSize:13,color:"#6B7494",marginBottom:20}}>This action cannot be undone. The request and all its logs will be permanently deleted.</p>
-            <div style={{display:"flex",gap:10,justifyContent:"center"}}>
-              <button className="btn" style={{background:"#EF4444",color:"#fff",padding:"10px 20px"}} onClick={()=>deleteRequest(deleteConfirm)}>Yes, Delete</button>
-              <button className="btn" style={{background:"#F7F8FC",color:"#6B7494",padding:"10px 20px"}} onClick={()=>setDeleteConfirm(null)}>Cancel</button>
+      {/* ── EMAIL MODAL ── */}
+      {emailMod&&<EmailModal req={emailMod.req} level={emailMod.level} onClose={()=>setEmailMod(null)}/>}
+
+      {/* ── DELETE CONFIRM ── */}
+      {delConfirm&&(
+        <div className="overlay" onClick={()=>setDelConf(null)}>
+          <div className="card" style={{maxWidth:360,width:"100%",padding:26,textAlign:"center"}} onClick={e=>e.stopPropagation()}>
+            <div style={{fontSize:36,marginBottom:10}}>🗑</div>
+            <h3 style={{fontSize:17,fontWeight:700,marginBottom:7}}>Delete this request?</h3>
+            <p style={{fontSize:12,color:"#7B84A0",marginBottom:18,lineHeight:1.6}}>This cannot be undone. All logs and data for this request will be permanently deleted.</p>
+            <div style={{display:"flex",gap:9,justifyContent:"center"}}>
+              <button className="btn" style={{background:"#DC2626",color:"#fff",padding:"10px 18px"}} onClick={()=>deleteReq(delConfirm)}>Yes, Delete</button>
+              <button className="btn" style={{background:"#F7F8FC",color:"#6B7494",padding:"10px 18px"}} onClick={()=>setDelConf(null)}>Cancel</button>
             </div>
           </div>
         </div>
       )}
 
-      {toast&&(<div className="toast" style={{background:toast.type==="error"?"#FEF2F2":"#ECFDF5",color:toast.type==="error"?"#EF4444":"#10B981",border:`1px solid ${toast.type==="error"?"#FECACA":"#A7F3D0"}`}}><span>{toast.type==="error"?"⚠":"✓"}</span>{toast.msg}</div>)}
+      {/* ── TOAST ── */}
+      {toast&&<div className="toast" style={{background:toast.type==="error"?"#FEF2F2":"#ECFDF5",color:toast.type==="error"?"#DC2626":"#059669",border:`1px solid ${toast.type==="error"?"#FECACA":"#A7F3D0"}`}}><span>{toast.type==="error"?"⚠":"✓"}</span>{toast.msg}</div>}
     </div>
   );
 }
 
-// ── ROOT ─────────────────────────────────────────────────────
-function Root() {
-  const [user, setUser] = useState(null);
-  const params = new URLSearchParams(window.location.search);
-  const docId  = params.get("docId");
-  const level  = parseInt(params.get("level")||"1");
-  if (docId) return <ManagerApprovalPage docId={docId} level={level}/>;
-  if (!user)  return <LoginScreen onLogin={setUser}/>;
+// ─── ROOT ─────────────────────────────────────────────────────
+function Root(){
+  const [user,setUser]=useState(null);
+  const p=new URLSearchParams(window.location.search);
+  const docId=p.get("docId");
+  const level=parseInt(p.get("level")||"1");
+  if(docId) return <ManagerPage docId={docId} level={level}/>;
+  if(!user)  return <Login onLogin={setUser}/>;
   return <App user={user} onLogout={()=>setUser(null)}/>;
 }
-
-ReactDOM.createRoot(document.getElementById('root')).render(<Root/>);
+ReactDOM.createRoot(document.getElementById("root")).render(<Root/>);
 </script>
 </body>
 </html>
