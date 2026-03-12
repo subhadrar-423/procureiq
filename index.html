@@ -369,6 +369,42 @@ ${link}
   );
 }
 
+
+// ── COMPARE VIEW COMPONENT ────────────────────────────────────
+function CompareView({ subs }) {
+  const [sel, setSel] = useState([]);
+  const compareList   = subs.filter(s=>sel.includes(s.id));
+  return (
+    <div>
+      <div style={{marginBottom:20}}><h1 style={{fontSize:22,fontWeight:700,color:"#1A1D2E"}}>⚖ Compare Tools</h1></div>
+      {subs.length<2?(<div className="card" style={{padding:60,textAlign:"center",color:"#A0A8C0"}}><div style={{fontSize:32,marginBottom:8}}>⚖</div>Need at least 2 requests to compare.</div>):(
+        <div>
+          <div className="card" style={{padding:16,marginBottom:14}}>
+            <div style={{fontSize:13,color:"#6B7494",marginBottom:10}}>Select tools to compare (pick 2+):</div>
+            <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+              {subs.slice(0,20).map(s=><button key={s.id} className="btn" style={{padding:"6px 12px",background:sel.includes(s.id)?"#EEF2FF":"#F7F8FC",color:sel.includes(s.id)?"#6366F1":"#6B7494",border:`1.5px solid ${sel.includes(s.id)?"#C7D2FE":"#E8EBF4"}`}} onClick={()=>setSel(prev=>prev.includes(s.id)?prev.filter(x=>x!==s.id):[...prev,s.id])}>{s.toolName}</button>)}
+            </div>
+          </div>
+          {compareList.length>=2&&(
+            <div className="card" style={{overflow:"hidden"}}>
+              <div style={{display:"flex",borderBottom:"1px solid #E8EBF4"}}>
+                <div style={{width:130,flexShrink:0,background:"#F7F8FC",padding:16}}><div style={{fontSize:11,fontWeight:700,color:"#A0A8C0",textTransform:"uppercase"}}>Criteria</div></div>
+                {compareList.map(s=><div key={s.id} style={{flex:1,padding:16,borderLeft:"1px solid #E8EBF4"}}><div style={{fontWeight:700,fontSize:14}}>{s.toolName}</div><div style={{fontSize:11,color:"#A0A8C0"}}>{s.toolVendor}</div></div>)}
+              </div>
+              {[["Cost",s=>`$${parseFloat(s.costAmount||0).toLocaleString()} / ${s.costPeriod}`],["Yearly",s=>`$${yearlyEquiv(s.costAmount,s.costPeriod).toLocaleString()}`],["Dept",s=>s.department],["Category",s=>s.toolCategory],["Seats",s=>s.seats||"—"],["Urgency",s=>s.urgency||"—"],["Status",s=>STATUS_CFG[s.status]?.label||"—"],["Submitted By",s=>s.submitterName||"—"]].map(([lb,fn])=>(
+                <div key={lb} style={{display:"flex",borderBottom:"1px solid #F0F2F8"}}>
+                  <div style={{width:130,flexShrink:0,background:"#F7F8FC",padding:"10px 16px",display:"flex",alignItems:"center"}}><span style={{fontSize:11,fontWeight:700,color:"#A0A8C0",textTransform:"uppercase"}}>{lb}</span></div>
+                  {compareList.map(s=><div key={s.id} style={{flex:1,padding:"10px 16px",borderLeft:"1px solid #F0F2F8",fontSize:13}}>{fn(s)}</div>)}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── MAIN APP ─────────────────────────────────────────────────
 function App({ user, onLogout }) {
   const [view, setView]           = useState("dashboard");
@@ -626,7 +662,7 @@ function App({ user, onLogout }) {
                             <td style={{padding:"10px 12px",fontSize:11,color:"#A0A8C0",whiteSpace:"nowrap"}}>{formatDT(s.submittedAt)}</td>
                             <td style={{padding:"10px 12px"}}><span className="badge" style={{background:sc.bg,color:sc.color,fontSize:11}}>{sc.label}</span>{s.procurementStatus&&<div style={{fontSize:10,marginTop:3,color:PROC_STATUSES.find(p=>p.value===s.procurementStatus)?.color||"#A0A8C0"}}>{PROC_STATUSES.find(p=>p.value===s.procurementStatus)?.label}</div>}</td>
                             <td style={{padding:"10px 12px"}} onClick={e=>e.stopPropagation()}>
-                              <div style={{display:"flex",gap:4",flexWrap:"wrap"}}>
+                              <div style={{display:"flex",gap:4,flexWrap:"wrap"}}>
                                 {s.status==="mgr1-pending"&&<button className="btn" style={{background:"#EEF2FF",color:"#6366F1",padding:"4px 8px",fontSize:11}} onClick={()=>setEmailModal({req:s,level:1})}>📧 Mgr1</button>}
                                 {s.status==="mgr2-pending"&&<button className="btn" style={{background:"#F5F3FF",color:"#8B5CF6",padding:"4px 8px",fontSize:11}} onClick={()=>setEmailModal({req:s,level:2})}>📧 Mgr2</button>}
                                 {canApprove&&s.status==="procurement-review"&&<><button className="btn" style={{background:"#ECFDF5",color:"#10B981",padding:"4px 8px",fontSize:11}} onClick={()=>procurementDecide(s.id,true)}>✓</button><button className="btn" style={{background:"#FEF2F2",color:"#EF4444",padding:"4px 8px",fontSize:11}} onClick={()=>procurementDecide(s.id,false)}>✕</button></>}
@@ -910,39 +946,7 @@ function App({ user, onLogout }) {
         )}
 
         {/* ── COMPARE ── */}
-        {view==="compare"&&(
-          <div>
-            <div style={{marginBottom:20}}><h1 style={{fontSize:22,fontWeight:700,color:"#1A1D2E"}}>⚖ Compare Tools</h1></div>
-            {subs.filter(s=>s.id).length<2?(<div className="card" style={{padding:60,textAlign:"center",color:"#A0A8C0"}}><div style={{fontSize:32,marginBottom:8}}>⚖</div>Need at least 2 requests to compare.</div>):(()=>{
-              const [sel, setSel] = useState([]);
-              const compareList  = subs.filter(s=>sel.includes(s.id));
-              return(
-                <div>
-                  <div className="card" style={{padding:16,marginBottom:14}}>
-                    <div style={{fontSize:13,color:"#6B7494",marginBottom:10}}>Select tools to compare:</div>
-                    <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
-                      {subs.slice(0,20).map(s=><button key={s.id} className="btn" style={{padding:"6px 12px",background:sel.includes(s.id)?"#EEF2FF":"#F7F8FC",color:sel.includes(s.id)?"#6366F1":"#6B7494",border:`1.5px solid ${sel.includes(s.id)?"#C7D2FE":"#E8EBF4"}`}} onClick={()=>setSel(prev=>prev.includes(s.id)?prev.filter(x=>x!==s.id):[...prev,s.id])}>{s.toolName}</button>)}
-                    </div>
-                  </div>
-                  {compareList.length>=2&&(
-                    <div className="card" style={{overflow:"hidden"}}>
-                      <div style={{display:"flex",borderBottom:"1px solid #E8EBF4"}}>
-                        <div style={{width:130,flexShrink:0,background:"#F7F8FC",padding:16}}><div className="sec-title" style={{marginBottom:0}}>Criteria</div></div>
-                        {compareList.map(s=><div key={s.id} style={{flex:1,padding:16,borderLeft:"1px solid #E8EBF4"}}><div style={{fontWeight:700,fontSize:14}}>{s.toolName}</div><div style={{fontSize:11,color:"#A0A8C0"}}>{s.toolVendor}</div></div>)}
-                      </div>
-                      {[["Cost",s=>`$${parseFloat(s.costAmount||0).toLocaleString()} / ${s.costPeriod}`],["Yearly",s=>`$${yearlyEquiv(s.costAmount,s.costPeriod).toLocaleString()}`],["Dept",s=>s.department],["Category",s=>s.toolCategory],["Seats",s=>s.seats||"—"],["Urgency",s=>s.urgency],["Status",s=>STATUS_CFG[s.status]?.label||"—"],["By",s=>s.submitterName||"—"]].map(([lb,fn])=>(
-                        <div key={lb} style={{display:"flex",borderBottom:"1px solid #F0F2F8"}}>
-                          <div style={{width:130,flexShrink:0,background:"#F7F8FC",padding:"10px 16px",display:"flex",alignItems:"center"}}><span style={{fontSize:11,fontWeight:700,color:"#A0A8C0",textTransform:"uppercase"}}>{lb}</span></div>
-                          {compareList.map(s=><div key={s.id} style={{flex:1,padding:"10px 16px",borderLeft:"1px solid #F0F2F8",fontSize:13}}>{fn(s)}</div>)}
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              );
-            })()}
-          </div>
-        )}
+        {view==="compare"&&<CompareView subs={subs}/>}
       </div>
 
       {/* Email Modal */}
