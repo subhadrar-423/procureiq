@@ -68,7 +68,7 @@ const initialForm = {
   submitterName:"", submitterEmail:"", department:"",
   managerName:"", managerEmail:"",
   toolName:"", toolVendor:"", toolCategory:"Productivity",
-  annualCost:"", seats:"", justification:"",
+  annualCost:"", costPeriod:"monthly", seats:"", justification:"",
   alternatives:[{name:"",vendor:"",annualCost:"",notes:""}],
   urgency:"normal",
 };
@@ -177,7 +177,7 @@ function ManagerApprovalPage({ docId, action }) {
         <div className="card" style={{padding:22,marginBottom:16}}>
           <div className="sec">Request Summary</div>
           <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:14}}>
-            {[["Tool",request.toolName],["Vendor",request.toolVendor||"—"],["Annual Cost",`$${parseFloat(request.annualCost||0).toLocaleString()}`],["Seats",request.seats||"—"],["Department",request.department||"—"],["Submitted By",request.submitterName]].map(([k,v])=>(
+            {[["Tool",request.toolName],["Vendor",request.toolVendor||"—"],["Cost",`$${parseFloat(request.annualCost||0).toLocaleString()} / ${request.costPeriod||"monthly"}`],["Seats",request.seats||"—"],["Department",request.department||"—"],["Submitted By",request.submitterName]].map(([k,v])=>(
               <div key={k} style={{background:"#1A1D27",padding:"10px 12px",borderRadius:8}}>
                 <div style={{fontSize:10,color:"#4B5268",textTransform:"uppercase",letterSpacing:"0.08em",marginBottom:2}}>{k}</div>
                 <div style={{fontSize:13,fontWeight:500}}>{v}</div>
@@ -330,6 +330,7 @@ function App() {
   const [sortBy, setSortBy]           = useState("date");
   const [searchQuery, setSearchQuery] = useState("");
   const [saving, setSaving]           = useState(false);
+  const [editId, setEditId]             = useState(null);
   const [emailModal, setEmailModal]   = useState(null);
   const toastTimer = useRef(null);
 
@@ -354,18 +355,44 @@ function App() {
     if (!form.managerName||!form.managerEmail){showToast("Please enter your Manager's name and email.","error");return;}
     setSaving(true);
     try {
-      const ref = await db.collection("procurements").add({
-        ...form, status:"manager-review",
-        submittedAt: firebase.firestore.FieldValue.serverTimestamp(),
-        auditLog:[{action:"Submitted",by:form.submitterName,at:new Date().toISOString(),note:"Awaiting manager approval"}],
-      });
-      const newDoc = {id:ref.id,...form};
-      setForm(initialForm);
-      setView("dashboard");
-      showToast("Request submitted! Now send the approval email to your manager.");
-      setTimeout(()=>setEmailModal(newDoc),600);
+      if (editId) {
+        // EDIT MODE — only allowed while still pending manager review
+        await db.collection("procurements").doc(editId).update({
+          ...form,
+          updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
+          auditLog: firebase.firestore.FieldValue.arrayUnion({action:"Edited",by:form.submitterName,at:new Date().toISOString(),note:"Request details updated before manager review"}),
+        });
+        setForm(initialForm); setEditId(null); setView("dashboard");
+        showToast("Request updated successfully!");
+      } else {
+        // NEW SUBMISSION
+        const ref = await db.collection("procurements").add({
+          ...form, status:"manager-review",
+          submittedAt: firebase.firestore.FieldValue.serverTimestamp(),
+          auditLog:[{action:"Submitted",by:form.submitterName,at:new Date().toISOString(),note:"Awaiting manager approval"}],
+        });
+        const newDoc = {id:ref.id,...form};
+        setForm(initialForm);
+        setView("dashboard");
+        showToast("Request submitted! Now send the approval email to your manager.");
+        setTimeout(()=>setEmailModal(newDoc),600);
+      }
     } catch(e){showToast("Error: "+e.message,"error");}
     setSaving(false);
+  };
+
+  const startEdit = (s) => {
+    setForm({
+      submitterName:s.submitterName||"", submitterEmail:s.submitterEmail||"", department:s.department||"",
+      managerName:s.managerName||"", managerEmail:s.managerEmail||"",
+      toolName:s.toolName||"", toolVendor:s.toolVendor||"", toolCategory:s.toolCategory||"Productivity",
+      annualCost:s.annualCost||"", costPeriod:s.costPeriod||"monthly", seats:s.seats||"", justification:s.justification||"",
+      alternatives:s.alternatives||[{name:"",vendor:"",annualCost:"",notes:""}],
+      urgency:s.urgency||"normal",
+    });
+    setEditId(s.id);
+    setDetailId(null);
+    setView("submit");
   };
 
   const procurementAction = async (id,approved,note="") => {
@@ -466,12 +493,12 @@ function App() {
                         <td style={{padding:"10px 12px"}}><div style={{fontWeight:500,fontSize:13}}>{s.toolName}</div><div style={{fontSize:11,color:"#6B7094"}}>{s.submitterName}</div></td>
                         <td style={{padding:"10px 12px",fontSize:12,color:"#9CA3C0"}}>{s.department}</td>
                         <td style={{padding:"10px 12px"}}><div style={{fontSize:12,fontWeight:500}}>{s.managerName}</div><div style={{fontSize:11,color:"#6B7094"}}>{s.managerEmail}</div></td>
-                        <td style={{padding:"10px 12px",fontFamily:"monospace",fontSize:12,fontWeight:500}}>${parseFloat(s.annualCost||0).toLocaleString()}</td>
+                        <td style={{padding:"10px 12px",fontFamily:"monospace",fontSize:12,fontWeight:500}}>${parseFloat(s.annualCost||0).toLocaleString()}<span style={{fontSize:9,color:"#4B5268",marginLeft:3}}>{s.costPeriod==="monthly"?"/mo":"/yr"}</span></td>
                         <td style={{padding:"10px 12px",fontSize:11,color:"#6B7094",whiteSpace:"nowrap"}}>{formatDate(s.submittedAt)}</td>
                         <td style={{padding:"10px 12px"}}><span className="badge" style={{background:sc.bg,color:sc.color}}><span style={{width:6,height:6,borderRadius:"50%",background:sc.dot}}/>{sc.label}</span></td>
                         <td style={{padding:"10px 12px"}} onClick={e=>e.stopPropagation()}>
                           <div style={{display:"flex",gap:5}}>
-                            {s.status==="manager-review"&&<button className="btn" style={{background:"#1E2B3A",color:"#6366F1",padding:"4px 10px",fontSize:11}} onClick={()=>setEmailModal(s)}>📧 Resend</button>}
+                            {s.status==="manager-review"&&<><button className="btn" style={{background:"#1E2B3A",color:"#6366F1",padding:"4px 10px",fontSize:11}} onClick={(e)=>{e.stopPropagation();setEmailModal(s);}}>📧</button><button className="btn" style={{background:"#2A2510",color:"#F59E0B",padding:"4px 10px",fontSize:11}} onClick={(e)=>{e.stopPropagation();startEdit(s);}}>✏️</button></>}
                             {s.status==="procurement-review"&&<><button className="btn" style={{background:"#1E3A2F",color:"#10B981",padding:"4px 10px",fontSize:11}} onClick={()=>procurementAction(s.id,true)}>✓</button><button className="btn" style={{background:"#3A1E1E",color:"#EF4444",padding:"4px 10px",fontSize:11}} onClick={()=>procurementAction(s.id,false)}>✕</button></>}
                           </div>
                         </td>
@@ -502,7 +529,7 @@ function App() {
                     <span className="badge" style={{background:STATUS_CONFIG[detail.status]?.bg,color:STATUS_CONFIG[detail.status]?.color,fontSize:12,padding:"5px 12px"}}><span style={{width:6,height:6,borderRadius:"50%",background:STATUS_CONFIG[detail.status]?.dot}}/>{STATUS_CONFIG[detail.status]?.label}</span>
                   </div>
                   <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:12,marginBottom:16}}>
-                    {[["Annual Cost",`$${parseFloat(detail.annualCost||0).toLocaleString()}`],["Seats",detail.seats||"—"],["Department",detail.department||"—"],["Category",detail.toolCategory],["Urgency",(detail.urgency||"normal").charAt(0).toUpperCase()+(detail.urgency||"").slice(1)],["Submitted By",detail.submitterName]].map(([k,v])=>(
+                    {[["Cost",`$${parseFloat(detail.annualCost||0).toLocaleString()} / ${detail.costPeriod||"monthly"}`],["Seats",detail.seats||"—"],["Department",detail.department||"—"],["Category",detail.toolCategory],["Urgency",(detail.urgency||"normal").charAt(0).toUpperCase()+(detail.urgency||"").slice(1)],["Submitted By",detail.submitterName]].map(([k,v])=>(
                       <div key={k} style={{background:"#1A1D27",padding:"11px 13px",borderRadius:8}}><div style={{fontSize:10,color:"#4B5268",textTransform:"uppercase",letterSpacing:"0.08em",marginBottom:3}}>{k}</div><div style={{fontSize:13,fontWeight:500}}>{v}</div></div>
                     ))}
                   </div>
@@ -522,7 +549,9 @@ function App() {
                   <div className="card" style={{padding:20,marginBottom:14}}>
                     <div className="sec">Manager Approval Pending</div>
                     <p style={{fontSize:12,color:"#6B7094",marginBottom:12,lineHeight:1.6}}>Waiting for <strong style={{color:"#E8EAF0"}}>{detail.managerName}</strong> to approve via email link.</p>
-                    <button className="btn" style={{background:"#6366F1",color:"white",padding:"9px",fontSize:13,width:"100%"}} onClick={()=>setEmailModal(detail)}>📧 Resend Approval Email</button>
+                    <button className="btn" style={{background:"#6366F1",color:"white",padding:"9px",fontSize:13,width:"100%",marginBottom:8}} onClick={()=>setEmailModal(detail)}>📧 Resend Approval Email</button>
+                    <button className="btn" style={{background:"#1E2130",color:"#F59E0B",padding:"9px",fontSize:13,width:"100%",border:"1px solid #F59E0B30"}} onClick={()=>startEdit(detail)}>✏️ Edit Request</button>
+                    <div style={{fontSize:11,color:"#4B5268",marginTop:6,textAlign:"center"}}>You can edit while awaiting manager approval</div>
                   </div>
                 )}
                 {detail.status==="procurement-review"&&(
@@ -560,7 +589,11 @@ function App() {
         {/* SUBMIT */}
         {view==="submit"&&(
           <div style={{maxWidth:720}}>
-            <div style={{marginBottom:24}}><h1 style={{fontSize:24,fontWeight:600,color:"#F0F2FA"}}>New Tool Request</h1><p style={{fontSize:13,color:"#6B7094",marginTop:3}}>After submitting, an approval email will be sent to your manager</p></div>
+            <div style={{marginBottom:24}}>
+              <h1 style={{fontSize:24,fontWeight:600,color:"#F0F2FA"}}>{editId?"✏️ Edit Request":"New Tool Request"}</h1>
+              <p style={{fontSize:13,color:"#6B7094",marginTop:3}}>{editId?"Editing is only allowed before manager approves — all changes are logged.":"After submitting, an approval email will be sent to your manager"}</p>
+              {editId&&<div style={{marginTop:8,padding:"8px 14px",background:"#2A2510",border:"1px solid #F59E0B30",borderRadius:8,fontSize:12,color:"#F59E0B",display:"inline-block"}}>⚠ Editing existing request — changes will be saved to Firebase</div>}
+            </div>
             <div className="card" style={{padding:24,marginBottom:16}}>
               <div className="sec">Your Information</div>
               <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:14}}>
@@ -586,7 +619,17 @@ function App() {
                 <div><label>Urgency</label><div style={{display:"flex",gap:7}}>{["low","normal","high"].map(u=><button key={u} className="urg-btn" style={form.urgency===u?{background:u==="high"?"#3A1E1E":u==="normal"?"#1E2B3A":"#1E3A2F",color:u==="high"?"#EF4444":u==="normal"?"#6366F1":"#10B981",borderColor:u==="high"?"#EF4444":u==="normal"?"#6366F1":"#10B981"}:{}} onClick={()=>setForm({...form,urgency:u})}>{u.charAt(0).toUpperCase()+u.slice(1)}</button>)}</div></div>
               </div>
               <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:14,marginBottom:14}}>
-                <div><label>Annual Cost (USD) *</label><input className="inp" type="number" placeholder="e.g. 12000" value={form.annualCost} onChange={e=>setForm({...form,annualCost:e.target.value})}/></div>
+                <div>
+                  <label>Cost Amount (USD) *</label>
+                  <div style={{display:"flex",gap:0,marginBottom:6}}>
+                    <button type="button" className="btn" style={{background:form.costPeriod==="monthly"?"#6366F1":"#1A1D27",color:form.costPeriod==="monthly"?"white":"#8B8FA8",padding:"9px 14px",fontSize:12,borderRadius:"8px 0 0 8px",border:"1px solid #2E3347"}} onClick={()=>setForm({...form,costPeriod:"monthly"})}>Monthly</button>
+                    <button type="button" className="btn" style={{background:form.costPeriod==="yearly"?"#6366F1":"#1A1D27",color:form.costPeriod==="yearly"?"white":"#8B8FA8",padding:"9px 14px",fontSize:12,borderRadius:"0 8px 8px 0",border:"1px solid #2E3347",borderLeft:"none"}} onClick={()=>setForm({...form,costPeriod:"yearly"})}>Yearly</button>
+                  </div>
+                  <input className="inp" type="number" placeholder={form.costPeriod==="monthly"?"e.g. 1000 per month":"e.g. 12000 per year"} value={form.annualCost} onChange={e=>setForm({...form,annualCost:e.target.value})}/>
+                  {form.annualCost&&<div style={{fontSize:11,color:"#6B7094",marginTop:4}}>
+                    {form.costPeriod==="monthly"?`= $${(parseFloat(form.annualCost)*12).toLocaleString()} / year`:`= $${(parseFloat(form.annualCost)/12).toFixed(0).toLocaleString()} / month`}
+                  </div>}
+                </div>
                 <div><label>Seats / Licenses</label><input className="inp" type="number" placeholder="e.g. 25" value={form.seats} onChange={e=>setForm({...form,seats:e.target.value})}/></div>
               </div>
               <div><label>Business Justification</label><textarea className="inp" rows={3} placeholder="Explain why this tool is needed…" value={form.justification} onChange={e=>setForm({...form,justification:e.target.value})} style={{resize:"vertical"}}/></div>
@@ -612,9 +655,9 @@ function App() {
             </div>
             <div style={{display:"flex",gap:10,alignItems:"center"}}>
               <button className="btn" style={{background:"#6366F1",color:"white",padding:"11px 24px",fontSize:14,display:"flex",alignItems:"center",gap:8,opacity:saving?0.7:1}} onClick={submitForm} disabled={saving}>
-                {saving&&<span className="spinner"/>}{saving?"Saving…":"Submit & Send to Manager →"}
+                {saving&&<span className="spinner"/>}{saving?"Saving…":editId?"💾 Save Changes":"Submit & Send to Manager →"}
               </button>
-              <button className="btn" style={{background:"#1A1D27",color:"#6B7094",padding:"11px 18px",fontSize:14}} onClick={()=>{setForm(initialForm);setView("dashboard");}}>Cancel</button>
+              <button className="btn" style={{background:"#1A1D27",color:"#6B7094",padding:"11px 18px",fontSize:14}} onClick={()=>{setForm(initialForm);setEditId(null);setView("dashboard");}}>Cancel</button>
             </div>
           </div>
         )}
