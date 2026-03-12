@@ -3,211 +3,294 @@
 <head>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-<title>ProcureIQ — Tool Evaluation</title>
+<title>ProcureIQ</title>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
 <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
 <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
 <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
-<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet"/>
 <style>
-  *{box-sizing:border-box;margin:0;padding:0;}
-  html,body,#root{height:100%;width:100%;}
-  body{background:#0F1117;color:#E8EAF0;font-family:'DM Sans','Segoe UI',sans-serif;}
-  ::-webkit-scrollbar{width:6px;}::-webkit-scrollbar-track{background:#1A1D27;}::-webkit-scrollbar-thumb{background:#2E3347;border-radius:3px;}
+*{box-sizing:border-box;margin:0;padding:0;}
+html,body,#root{height:100%;width:100%;}
+body{background:#F4F6FA;color:#1A1D2E;font-family:'Inter','Segoe UI',sans-serif;}
+::-webkit-scrollbar{width:5px;}
+::-webkit-scrollbar-track{background:#F0F2F8;}
+::-webkit-scrollbar-thumb{background:#C8CEDD;border-radius:3px;}
 </style>
 <script>
-  const firebaseConfig = {
-    apiKey: "AIzaSyBzZoxoMrQL3GaeneRtGewT9es-PGgEl70",
-    authDomain: "procureiq-7201b.firebaseapp.com",
-    projectId: "procureiq-7201b",
-    storageBucket: "procureiq-7201b.firebasestorage.app",
-    messagingSenderId: "347584685186",
-    appId: "1:347584685186:web:4d576fccf205597f49c09b"
-  };
-  firebase.initializeApp(firebaseConfig);
-  const db = firebase.firestore();
-  db.settings({ experimentalForceLongPolling: true, merge: true });
+const firebaseConfig = {
+  apiKey: "AIzaSyBzZoxoMrQL3GaeneRtGewT9es-PGgEl70",
+  authDomain: "procureiq-7201b.firebaseapp.com",
+  projectId: "procureiq-7201b",
+  storageBucket: "procureiq-7201b.firebasestorage.app",
+  messagingSenderId: "347584685186",
+  appId: "1:347584685186:web:4d576fccf205597f49c09b"
+};
+firebase.initializeApp(firebaseConfig);
+const db = firebase.firestore();
+db.settings({ experimentalForceLongPolling: true, merge: true });
 </script>
 </head>
 <body>
 <div id="root"></div>
 <script type="text/babel">
-const { useState, useEffect, useRef } = React;
+const { useState, useEffect, useRef, useMemo } = React;
 
-// ── STATUS FLOW ──────────────────────────────────────────────
-// pending → manager-review → manager-rejected (FINAL, stored)
-//                          → procurement-review → approved (FINAL)
-//                                               → rejected  (FINAL, stored)
-
-const STATUS_CONFIG = {
-  "pending":            { label:"Pending",             color:"#94A3B8", bg:"#94A3B820", dot:"#94A3B8" },
-  "manager-review":     { label:"Awaiting Manager",    color:"#F59E0B", bg:"#F59E0B20", dot:"#F59E0B" },
-  "manager-rejected":   { label:"Manager Rejected",    color:"#EF4444", bg:"#EF444420", dot:"#EF4444" },
-  "procurement-review": { label:"Awaiting Procurement",color:"#6366F1", bg:"#6366F120", dot:"#6366F1" },
-  "approved":           { label:"Approved",            color:"#10B981", bg:"#10B98120", dot:"#10B981" },
-  "rejected":           { label:"Procurement Rejected",color:"#DC2626", bg:"#DC262620", dot:"#DC2626" },
+// ── CONSTANTS ────────────────────────────────────────────────
+const ROLES = {
+  employee:    { label:"Employee",        color:"#6366F1", bg:"#EEF2FF", icon:"👤" },
+  manager:     { label:"Manager",         color:"#F59E0B", bg:"#FFFBEB", icon:"👔" },
+  procurement: { label:"Procurement Team",color:"#10B981", bg:"#ECFDF5", icon:"🏢" },
+  admin:       { label:"Admin",           color:"#EF4444", bg:"#FEF2F2", icon:"🔑" },
 };
 
-const APPROVAL_STEPS = [
-  { key:"submitted",          label:"Submitted",            icon:"📝" },
-  { key:"manager-review",     label:"Manager Approval",     icon:"👤" },
-  { key:"procurement-review", label:"Procurement Review",   icon:"🏢" },
-  { key:"approved",           label:"Final Decision",       icon:"✅" },
+const DEPARTMENTS = ["Engineering","Finance","HR","Marketing","Operations","Procurement","Sales","IT","Legal","Other"];
+const CATEGORIES  = ["Productivity","Security","Analytics","Communication","DevOps","HR Tools","Finance","Design","Other"];
+
+const PROC_STATUSES = [
+  { value:"purchased",           label:"Purchased",                color:"#10B981" },
+  { value:"in-process",          label:"In Process",               color:"#6366F1" },
+  { value:"not-purchased",       label:"Not Purchased",             color:"#EF4444" },
+  { value:"pending-vendor",      label:"Pending Vendor Confirmation",color:"#F59E0B" },
 ];
 
-const CATEGORIES = ["Productivity","Security","Analytics","Communication","DevOps","HR","Finance","Other"];
+const STATUS_CFG = {
+  "draft":              { label:"Draft",                  color:"#94A3B8", bg:"#F1F5F9" },
+  "mgr1-pending":       { label:"Awaiting Manager 1",     color:"#F59E0B", bg:"#FFFBEB" },
+  "mgr1-rejected":      { label:"Rejected by Manager 1",  color:"#EF4444", bg:"#FEF2F2" },
+  "mgr2-pending":       { label:"Awaiting Manager 2",     color:"#8B5CF6", bg:"#F5F3FF" },
+  "mgr2-rejected":      { label:"Rejected by Manager 2",  color:"#DC2626", bg:"#FEF2F2" },
+  "procurement-review": { label:"Awaiting Procurement",   color:"#0EA5E9", bg:"#F0F9FF" },
+  "approved":           { label:"Approved",               color:"#10B981", bg:"#ECFDF5" },
+  "rejected":           { label:"Rejected by Procurement",color:"#991B1B", bg:"#FEF2F2" },
+};
 
-function formatDate(val) {
+const STEPS = [
+  { key:"submit",      label:"Submitted",   icon:"📝" },
+  { key:"mgr1",        label:"Manager 1",   icon:"👔" },
+  { key:"mgr2",        label:"Manager 2",   icon:"👔" },
+  { key:"procurement", label:"Procurement", icon:"🏢" },
+  { key:"done",        label:"Decision",    icon:"✅" },
+];
+
+function stepIndex(status) {
+  if (!status||status==="draft") return 0;
+  if (status==="mgr1-pending") return 1;
+  if (status==="mgr1-rejected") return 1;
+  if (status==="mgr2-pending") return 2;
+  if (status==="mgr2-rejected") return 2;
+  if (status==="procurement-review") return 3;
+  return 4;
+}
+
+function formatDT(val) {
   if (!val) return "—";
-  try { const d = val?.toDate ? val.toDate() : new Date(val); return d.toLocaleDateString("en-US",{month:"short",day:"numeric",year:"numeric",hour:"2-digit",minute:"2-digit"}); }
-  catch { return "—"; }
+  try {
+    const d = val?.toDate ? val.toDate() : new Date(val);
+    return d.toLocaleDateString("en-IN",{day:"2-digit",month:"short",year:"numeric"})
+      + " " + d.toLocaleTimeString("en-IN",{hour:"2-digit",minute:"2-digit"});
+  } catch { return "—"; }
+}
+
+function yearlyEquiv(amount, period) {
+  const n = parseFloat(amount)||0;
+  return period==="monthly" ? n*12 : n;
 }
 
 const initialForm = {
-  submitterName:"", submitterEmail:"", department:"",
-  managerName:"", managerEmail:"",
-  toolName:"", toolVendor:"", toolCategory:"Productivity",
-  annualCost:"", costPeriod:"monthly", seats:"", justification:"",
-  alternatives:[{name:"",vendor:"",annualCost:"",notes:""}],
-  urgency:"normal",
+  toolName:"", toolVendor:"", toolCategory:"Productivity", department:"Engineering",
+  costAmount:"", costPeriod:"monthly",
+  seats:"", justification:"", urgency:"normal",
+  mgr1Name:"", mgr1Email:"",
+  mgr2Name:"", mgr2Email:"",
+  alternatives:[{name:"",vendor:"",cost:"",notes:""}],
 };
 
-const css = `
-  input,textarea,select{font-family:'DM Sans','Segoe UI',sans-serif;}
-  .btn{cursor:pointer;border:none;border-radius:8px;font-family:inherit;font-weight:500;transition:all 0.15s;}
-  .btn:hover{filter:brightness(1.1);transform:translateY(-1px);}
+// ── GLOBAL CSS ───────────────────────────────────────────────
+const G = `
+  .btn{cursor:pointer;border:none;border-radius:8px;font-family:inherit;font-weight:500;font-size:13px;transition:all 0.15s;display:inline-flex;align-items:center;gap:6px;}
+  .btn:hover{filter:brightness(0.95);transform:translateY(-1px);}
   .btn:active{transform:translateY(0);}
-  .card{background:#161922;border:1px solid #252836;border-radius:12px;}
-  .inp{background:#1A1D27;border:1px solid #2E3347;border-radius:8px;padding:10px 14px;color:#E8EAF0;width:100%;font-size:14px;outline:none;transition:border-color 0.15s;}
-  .inp:focus{border-color:#6366F1;}
-  .inp::placeholder{color:#4B5268;}
-  .nav-item{padding:8px 16px;border-radius:8px;cursor:pointer;font-size:14px;font-weight:500;transition:all 0.15s;color:#8B8FA8;display:flex;align-items:center;gap:10px;}
-  .nav-item:hover{background:#1E2130;color:#E8EAF0;}
-  .nav-item.active{background:#1E2130;color:#6366F1;}
-  .row-hover:hover{background:#1A1D27!important;cursor:pointer;}
-  .tab{padding:7px 14px;border-radius:8px;cursor:pointer;font-size:12px;font-weight:500;transition:all 0.15s;border:1px solid transparent;}
-  .tab.active{background:#6366F1;color:white;}
-  .tab:not(.active){color:#8B8FA8;}
-  .tab:not(.active):hover{color:#E8EAF0;background:#1E2130;}
+  .btn:disabled{opacity:0.6;cursor:not-allowed;transform:none;}
+  .card{background:#fff;border:1px solid #E8EBF4;border-radius:12px;box-shadow:0 1px 4px rgba(0,0,0,0.04);}
+  .inp{background:#fff;border:1.5px solid #DDE1EF;border-radius:8px;padding:9px 13px;color:#1A1D2E;width:100%;font-size:14px;font-family:inherit;outline:none;transition:border-color 0.15s;}
+  .inp:focus{border-color:#6366F1;box-shadow:0 0 0 3px #6366F115;}
+  .inp::placeholder{color:#A0A8C0;}
+  label{font-size:12px;font-weight:600;color:#6B7494;display:block;margin-bottom:5px;text-transform:uppercase;letter-spacing:0.05em;}
   .badge{display:inline-flex;align-items:center;gap:5px;padding:3px 10px;border-radius:20px;font-size:12px;font-weight:500;}
-  label{font-size:13px;font-weight:500;color:#9CA3C0;display:block;margin-bottom:6px;}
-  .sec{font-size:11px;font-weight:600;letter-spacing:0.1em;color:#4B5268;text-transform:uppercase;margin-bottom:12px;}
-  .alt-card{background:#1A1D27;border:1px solid #252836;border-radius:10px;padding:16px;margin-bottom:10px;}
-  .audit-item{display:flex;gap:12px;padding:12px 0;border-bottom:1px solid #1E2130;}
-  .audit-dot{width:8px;height:8px;border-radius:50%;margin-top:5px;flex-shrink:0;}
-  .toast{position:fixed;bottom:28px;right:28px;padding:14px 20px;border-radius:10px;font-size:14px;font-weight:500;z-index:9999;display:flex;align-items:center;gap:8px;box-shadow:0 8px 32px rgba(0,0,0,0.4);animation:slideIn 0.2s ease;max-width:420px;}
-  @keyframes slideIn{from{transform:translateY(20px);opacity:0;}to{transform:translateY(0);opacity:1;}}
-  .urg-btn{padding:8px 16px;border-radius:8px;border:1px solid #2E3347;cursor:pointer;font-size:13px;font-weight:500;transition:all 0.15s;background:transparent;color:#8B8FA8;}
-  .spinner{width:16px;height:16px;border:2px solid #ffffff40;border-top-color:#fff;border-radius:50%;animation:spin 0.7s linear infinite;display:inline-block;}
-  @keyframes spin{to{transform:rotate(360deg);}}
-  .live-dot{width:7px;height:7px;border-radius:50%;background:#10B981;display:inline-block;animation:pulse 2s infinite;}
-  @keyframes pulse{0%,100%{opacity:1;}50%{opacity:0.3;}}
-  .step-line{position:absolute;top:16px;left:calc(50% + 16px);right:calc(-50% + 16px);height:2px;background:#252836;}
-  .step-line.done{background:#10B981;}
-  .step-line.active{background:#6366F1;}
-  .email-box{background:#1A1D27;border:1px solid #2E3347;border-radius:10px;padding:16px;font-size:12px;color:#9CA3C0;line-height:1.8;font-family:monospace;white-space:pre-wrap;word-break:break-all;}
-  .approve-page{min-height:100vh;display:flex;align-items:center;justify-content:center;background:#0F1117;}
+  .nav-item{padding:9px 14px;border-radius:9px;cursor:pointer;font-size:13px;font-weight:500;display:flex;align-items:center;gap:10px;color:#6B7494;transition:all 0.15s;}
+  .nav-item:hover{background:#F0F2FA;color:#1A1D2E;}
+  .nav-item.active{background:#EEF2FF;color:#6366F1;font-weight:600;}
+  .tab{padding:6px 14px;border-radius:7px;cursor:pointer;font-size:12px;font-weight:500;transition:all 0.15s;border:1.5px solid transparent;color:#6B7494;}
+  .tab.active{background:#6366F1;color:#fff;border-color:#6366F1;}
+  .tab:not(.active):hover{background:#F0F2FA;color:#1A1D2E;}
+  .row-tr{transition:background 0.1s;cursor:pointer;}
+  .row-tr:hover{background:#F7F8FC!important;}
+  .sec-title{font-size:11px;font-weight:700;color:#A0A8C0;text-transform:uppercase;letter-spacing:0.1em;margin-bottom:12px;}
+  .toast{position:fixed;bottom:24px;right:24px;padding:13px 18px;border-radius:10px;font-size:13px;font-weight:500;z-index:9999;display:flex;align-items:center;gap:8px;box-shadow:0 8px 24px rgba(0,0,0,0.12);animation:tin 0.2s ease;}
+  @keyframes tin{from{transform:translateY(16px);opacity:0}to{transform:translateY(0);opacity:1}}
+  .spinner{width:14px;height:14px;border:2px solid rgba(255,255,255,0.3);border-top-color:#fff;border-radius:50%;animation:sp 0.7s linear infinite;display:inline-block;}
+  @keyframes sp{to{transform:rotate(360deg)}}
+  .modal-bg{position:fixed;inset:0;background:rgba(0,0,0,0.3);z-index:900;display:flex;align-items:center;justify-content:center;padding:20px;}
+  .step-dot{width:30px;height:30px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:600;flex-shrink:0;border:2px solid transparent;}
+  input[type=checkbox]{width:15px;height:15px;accent-color:#6366F1;cursor:pointer;}
+  select.inp{cursor:pointer;}
+  .field-row{display:grid;gap:14px;}
+  .alt-box{background:#F7F8FC;border:1.5px solid #E8EBF4;border-radius:10px;padding:14px;margin-bottom:10px;}
+  .audit-row{display:flex;gap:10px;padding:10px 0;border-bottom:1px solid #F0F2FA;}
+  .billing-tab{padding:8px 20px;border-radius:8px;cursor:pointer;font-size:13px;font-weight:600;border:2px solid #DDE1EF;background:#fff;transition:all 0.15s;}
+  .billing-tab.active{background:#6366F1;color:#fff;border-color:#6366F1;}
 `;
 
-// ── MANAGER APPROVAL PAGE (shown when ?action= is in URL) ────
-function ManagerApprovalPage({ docId, action }) {
-  const [request, setRequest] = useState(null);
-  const [loading, setLoading] = useState(true);
-  const [note, setNote]       = useState("");
-  const [done, setDone]       = useState(false);
-  const [saving, setSaving]   = useState(false);
-  const [error, setError]     = useState(null);
+// ── MANAGER APPROVAL PAGE ────────────────────────────────────
+function ManagerApprovalPage({ docId, level }) {
+  const [req, setReq]   = useState(null);
+  const [loading, setL] = useState(true);
+  const [note, setNote] = useState("");
+  const [done, setDone] = useState(null);
+  const [saving, setSav]= useState(false);
+  const [err, setErr]   = useState(null);
 
-  useEffect(() => {
+  useEffect(()=>{
     db.collection("procurements").doc(docId).get()
-      .then(d => { if (d.exists) setRequest({id:d.id,...d.data()}); else setError("Request not found."); setLoading(false); })
-      .catch(e => { setError(e.message); setLoading(false); });
-  }, [docId]);
+      .then(d=>{ if(d.exists) setReq({id:d.id,...d.data()}); else setErr("Request not found."); setL(false); })
+      .catch(e=>{ setErr(e.message); setL(false); });
+  },[docId]);
+
+  const expectedStatus = level===1 ? "mgr1-pending" : "mgr2-pending";
+  const mgrName = req ? (level===1 ? req.mgr1Name : req.mgr2Name) : "";
 
   const decide = async (approved) => {
-    if (!request) return;
-    if (request.status !== "manager-review") { setError("This request has already been actioned."); return; }
-    setSaving(true);
-    const newStatus = approved ? "procurement-review" : "manager-rejected";
-    const logEntry  = { action: approved ? "Manager Approved" : "Manager Rejected", by: request.managerName, at: new Date().toISOString(), note };
+    if (!req) return;
+    if (req.status !== expectedStatus) { setErr("This request has already been actioned."); return; }
+    setSav(true);
+    const nextStatus = approved
+      ? (level===1 ? "mgr2-pending" : "procurement-review")
+      : (level===1 ? "mgr1-rejected" : "mgr2-rejected");
+    const logEntry = {
+      action: approved ? `Manager ${level} Approved` : `Manager ${level} Rejected`,
+      by: mgrName, role: "manager", at: new Date().toISOString(),
+      date: new Date().toLocaleDateString("en-IN",{day:"2-digit",month:"short",year:"numeric"}),
+      time: new Date().toLocaleTimeString("en-IN",{hour:"2-digit",minute:"2-digit"}),
+      note
+    };
     try {
       await db.collection("procurements").doc(docId).update({
-        status: newStatus,
+        status: nextStatus,
         auditLog: firebase.firestore.FieldValue.arrayUnion(logEntry),
         updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
       });
       setDone(approved ? "approved" : "rejected");
-    } catch(e) { setError(e.message); }
-    setSaving(false);
+    } catch(e){ setErr(e.message); }
+    setSav(false);
   };
 
-  if (loading) return <div className="approve-page"><div style={{textAlign:"center",color:"#6B7094"}}><div style={{fontSize:32,marginBottom:12}}>⏳</div>Loading…</div></div>;
-  if (error)   return <div className="approve-page"><div style={{textAlign:"center",color:"#EF4444",maxWidth:400,padding:24}}><div style={{fontSize:32,marginBottom:12}}>⚠</div>{error}</div></div>;
+  const styles = { page:{minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",background:"#F4F6FA",padding:20} };
 
+  if (loading) return <div style={styles.page}><div style={{textAlign:"center",color:"#6B7494"}}><div style={{fontSize:32,marginBottom:10}}>⏳</div>Loading…</div></div>;
+  if (err)     return <div style={styles.page}><div style={{textAlign:"center",color:"#EF4444",maxWidth:400}}><div style={{fontSize:32,marginBottom:10}}>⚠️</div>{err}</div></div>;
   if (done) return (
-    <div className="approve-page">
-      <div style={{textAlign:"center",maxWidth:440,padding:32}}>
+    <div style={styles.page}>
+      <div style={{textAlign:"center",maxWidth:420,background:"#fff",borderRadius:16,padding:40,boxShadow:"0 4px 24px rgba(0,0,0,0.08)"}}>
         <div style={{fontSize:56,marginBottom:16}}>{done==="approved"?"✅":"❌"}</div>
-        <h2 style={{fontSize:22,fontWeight:600,color:"#F0F2FA",marginBottom:8}}>{done==="approved"?"Request Approved!":"Request Rejected"}</h2>
-        <p style={{color:"#6B7094",fontSize:14,lineHeight:1.7}}>{done==="approved" ? `You've approved the request for <strong>${request?.toolName}</strong>. It has been forwarded to the Procurement team for final review.` : `You've rejected the request for <strong>${request?.toolName}</strong>. This has been recorded.`}</p>
-        <div style={{marginTop:20,padding:"14px 20px",background:"#161922",border:"1px solid #252836",borderRadius:10,fontSize:12,color:"#6B7094"}}>You can close this tab.</div>
+        <h2 style={{fontSize:22,fontWeight:700,marginBottom:8}}>{done==="approved"?"Request Approved!":"Request Rejected"}</h2>
+        <p style={{color:"#6B7494",fontSize:14,lineHeight:1.7}}>{done==="approved"
+          ? `You've approved the request for "${req?.toolName}". ${level===1?"It will now go to Manager 2 for review.":"It has been sent to the Procurement team."}`
+          : `You've rejected the request for "${req?.toolName}". The requester will be notified.`}</p>
+        <div style={{marginTop:20,padding:"10px 16px",background:"#F7F8FC",borderRadius:8,fontSize:12,color:"#A0A8C0"}}>You can close this tab.</div>
+      </div>
+    </div>
+  );
+  if (req.status !== expectedStatus) return (
+    <div style={styles.page}>
+      <div style={{textAlign:"center",maxWidth:420,background:"#fff",borderRadius:16,padding:40,boxShadow:"0 4px 24px rgba(0,0,0,0.08)"}}>
+        <div style={{fontSize:48,marginBottom:12}}>🔒</div>
+        <h2 style={{fontSize:20,fontWeight:700,marginBottom:8}}>Already Actioned</h2>
+        <p style={{color:"#6B7494",fontSize:14}}>Status: <strong>{STATUS_CFG[req.status]?.label}</strong></p>
       </div>
     </div>
   );
 
-  if (request.status !== "manager-review") return (
-    <div className="approve-page">
-      <div style={{textAlign:"center",maxWidth:440,padding:32}}>
-        <div style={{fontSize:48,marginBottom:12}}>🔒</div>
-        <h2 style={{fontSize:20,fontWeight:600,color:"#F0F2FA",marginBottom:8}}>Already Actioned</h2>
-        <p style={{color:"#6B7094",fontSize:14}}>This request has already been {STATUS_CONFIG[request.status]?.label?.toLowerCase()}. No further action needed.</p>
-      </div>
-    </div>
-  );
+  const yearly = yearlyEquiv(req.costAmount, req.costPeriod);
 
   return (
-    <div className="approve-page">
-      <div style={{maxWidth:520,width:"100%",padding:24}}>
-        <div style={{textAlign:"center",marginBottom:28}}>
-          <div style={{width:48,height:48,background:"linear-gradient(135deg,#6366F1,#8B5CF6)",borderRadius:12,display:"inline-flex",alignItems:"center",justifyContent:"center",fontSize:22,marginBottom:12}}>⚙</div>
-          <h1 style={{fontSize:22,fontWeight:600,color:"#F0F2FA"}}>ProcureIQ — Manager Approval</h1>
-          <p style={{fontSize:13,color:"#6B7094",marginTop:4}}>Hi <strong style={{color:"#E8EAF0"}}>{request.managerName}</strong>, your approval is needed</p>
+    <div style={styles.page}>
+      <style>{G}</style>
+      <div style={{maxWidth:540,width:"100%",background:"#fff",borderRadius:16,boxShadow:"0 4px 24px rgba(0,0,0,0.08)",overflow:"hidden"}}>
+        <div style={{background:"linear-gradient(135deg,#6366F1,#8B5CF6)",padding:"24px 28px",color:"#fff"}}>
+          <div style={{fontSize:13,opacity:0.8,marginBottom:4}}>Manager {level} Approval Required</div>
+          <h1 style={{fontSize:20,fontWeight:700}}>ProcureIQ — Review Request</h1>
+          <div style={{marginTop:6,fontSize:13,opacity:0.85}}>Hi {mgrName}, please review and approve or reject below</div>
         </div>
-        <div className="card" style={{padding:22,marginBottom:16}}>
-          <div className="sec">Request Summary</div>
-          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:14}}>
-            {[["Tool",request.toolName],["Vendor",request.toolVendor||"—"],["Cost",`$${parseFloat(request.annualCost||0).toLocaleString()} / ${request.costPeriod||"monthly"}`],["Seats",request.seats||"—"],["Department",request.department||"—"],["Submitted By",request.submitterName]].map(([k,v])=>(
-              <div key={k} style={{background:"#1A1D27",padding:"10px 12px",borderRadius:8}}>
-                <div style={{fontSize:10,color:"#4B5268",textTransform:"uppercase",letterSpacing:"0.08em",marginBottom:2}}>{k}</div>
-                <div style={{fontSize:13,fontWeight:500}}>{v}</div>
+        <div style={{padding:24}}>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:16}}>
+            {[["Tool",req.toolName],["Vendor",req.toolVendor||"—"],["Cost",`$${parseFloat(req.costAmount||0).toLocaleString()} / ${req.costPeriod}`],["Yearly Total",`$${yearly.toLocaleString()}`],["Department",req.department],["Submitted By",req.submitterName||"—"]].map(([k,v])=>(
+              <div key={k} style={{background:"#F7F8FC",padding:"10px 12px",borderRadius:8}}>
+                <div style={{fontSize:10,color:"#A0A8C0",textTransform:"uppercase",letterSpacing:"0.08em",marginBottom:2}}>{k}</div>
+                <div style={{fontSize:13,fontWeight:600,color:"#1A1D2E"}}>{v}</div>
               </div>
             ))}
           </div>
-          {request.justification && <div><div className="sec">Justification</div><p style={{fontSize:13,color:"#B0B4CC",lineHeight:1.7}}>{request.justification}</p></div>}
-        </div>
-        {request.alternatives?.filter(a=>a.name).length>0&&(
-          <div className="card" style={{padding:20,marginBottom:16}}>
-            <div className="sec">Alternatives Considered</div>
-            {request.alternatives.filter(a=>a.name).map((alt,i)=>(
-              <div key={i} style={{display:"flex",justifyContent:"space-between",padding:"8px 0",borderBottom:"1px solid #1E2130"}}>
-                <span style={{fontSize:13}}>{alt.name} {alt.vendor&&<span style={{color:"#6B7094",fontSize:11}}>({alt.vendor})</span>}</span>
-                {alt.annualCost&&<span style={{fontFamily:"monospace",fontSize:12,color:"#F59E0B"}}>${parseFloat(alt.annualCost).toLocaleString()}/yr</span>}
-              </div>
-            ))}
+          {req.justification&&<div style={{background:"#F7F8FC",padding:"12px 14px",borderRadius:8,marginBottom:14}}><div style={{fontSize:10,color:"#A0A8C0",textTransform:"uppercase",letterSpacing:"0.08em",marginBottom:4}}>Justification</div><p style={{fontSize:13,color:"#4B5268",lineHeight:1.7}}>{req.justification}</p></div>}
+          <div style={{marginBottom:14}}>
+            <label>Note (optional)</label>
+            <textarea className="inp" rows={2} placeholder="Reason for approval or rejection…" value={note} onChange={e=>setNote(e.target.value)} style={{resize:"none"}}/>
           </div>
-        )}
-        <div className="card" style={{padding:20,marginBottom:16}}>
-          <label>Add a note (optional)</label>
-          <textarea className="inp" rows={3} placeholder="Reason for approval or rejection…" value={note} onChange={e=>setNote(e.target.value)} style={{resize:"none"}}/>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+            <button className="btn" style={{background:"#10B981",color:"#fff",padding:"12px",fontSize:14,justifyContent:"center",opacity:saving?0.7:1}} onClick={()=>decide(true)} disabled={saving}>{saving?<span className="spinner"/>:"✓ Approve"}</button>
+            <button className="btn" style={{background:"#EF4444",color:"#fff",padding:"12px",fontSize:14,justifyContent:"center",opacity:saving?0.7:1}} onClick={()=>decide(false)} disabled={saving}>{saving?<span className="spinner"/>:"✕ Reject"}</button>
+          </div>
         </div>
-        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
-          <button className="btn" style={{background:"#10B981",color:"white",padding:"13px",fontSize:14,opacity:saving?0.7:1}} onClick={()=>decide(true)} disabled={saving}>
-            {saving?<span className="spinner"/>:"✓ Approve Request"}
-          </button>
-          <button className="btn" style={{background:"#EF4444",color:"white",padding:"13px",fontSize:14,opacity:saving?0.7:1}} onClick={()=>decide(false)} disabled={saving}>
-            {saving?<span className="spinner"/>:"✕ Reject Request"}
-          </button>
+      </div>
+    </div>
+  );
+}
+
+// ── LOGIN SCREEN ─────────────────────────────────────────────
+function LoginScreen({ onLogin }) {
+  const [role, setRole]   = useState("employee");
+  const [name, setName]   = useState("");
+  const [email, setEmail] = useState("");
+  const [err, setErr]     = useState("");
+
+  const go = () => {
+    if (!name.trim()) { setErr("Please enter your name."); return; }
+    if (!email.trim()) { setErr("Please enter your email."); return; }
+    onLogin({ role, name: name.trim(), email: email.trim() });
+  };
+
+  return (
+    <div style={{minHeight:"100vh",background:"linear-gradient(135deg,#EEF2FF 0%,#F4F6FA 100%)",display:"flex",alignItems:"center",justifyContent:"center",padding:20}}>
+      <style>{G}</style>
+      <div style={{width:"100%",maxWidth:440}}>
+        <div style={{textAlign:"center",marginBottom:32}}>
+          <div style={{width:56,height:56,background:"linear-gradient(135deg,#6366F1,#8B5CF6)",borderRadius:14,display:"inline-flex",alignItems:"center",justifyContent:"center",fontSize:26,marginBottom:14,boxShadow:"0 4px 16px #6366F140"}}>⚙</div>
+          <h1 style={{fontSize:26,fontWeight:700,color:"#1A1D2E"}}>ProcureIQ</h1>
+          <p style={{color:"#6B7494",fontSize:14,marginTop:4}}>Procurement Management System</p>
+        </div>
+        <div className="card" style={{padding:28}}>
+          <div style={{marginBottom:20}}>
+            <label>Your Name</label>
+            <input className="inp" placeholder="e.g. Subhadra" value={name} onChange={e=>setName(e.target.value)}/>
+          </div>
+          <div style={{marginBottom:20}}>
+            <label>Your Email</label>
+            <input className="inp" type="email" placeholder="you@company.com" value={email} onChange={e=>setEmail(e.target.value)}/>
+          </div>
+          <div style={{marginBottom:20}}>
+            <label>Select Your Role</label>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+              {Object.entries(ROLES).map(([key,r])=>(
+                <div key={key} onClick={()=>setRole(key)} style={{padding:"12px 14px",border:`2px solid ${role===key?r.color:"#DDE1EF"}`,borderRadius:10,cursor:"pointer",background:role===key?r.bg:"#fff",transition:"all 0.15s"}}>
+                  <div style={{fontSize:18,marginBottom:4}}>{r.icon}</div>
+                  <div style={{fontSize:13,fontWeight:600,color:role===key?r.color:"#1A1D2E"}}>{r.label}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+          {err&&<div style={{color:"#EF4444",fontSize:12,marginBottom:12,padding:"8px 12px",background:"#FEF2F2",borderRadius:7}}>{err}</div>}
+          <button className="btn" style={{background:"#6366F1",color:"#fff",padding:"12px",fontSize:14,width:"100%",justifyContent:"center"}} onClick={go}>Enter ProcureIQ →</button>
         </div>
       </div>
     </div>
@@ -215,34 +298,22 @@ function ManagerApprovalPage({ docId, action }) {
 }
 
 // ── APPROVAL STEPPER ─────────────────────────────────────────
-function ApprovalStepper({ status }) {
-  const getStepState = (stepKey) => {
-    const order = ["pending","manager-review","procurement-review","approved"];
-    const rejected = status==="manager-rejected"||status==="rejected";
-    const idx = order.indexOf(status==="manager-rejected"?"manager-review":status==="rejected"?"procurement-review":status);
-    const sIdx = order.indexOf(stepKey==="submitted"?"pending":stepKey);
-    if (rejected && stepKey==="approved") return "rejected";
-    if (sIdx < idx) return "done";
-    if (sIdx === idx) return rejected?"rejected":"active";
-    return "pending";
-  };
-  const steps = [
-    {label:"Submitted",icon:"📝",key:"submitted"},
-    {label:"Manager",icon:"👤",key:"manager-review"},
-    {label:"Procurement",icon:"🏢",key:"procurement-review"},
-    {label:"Decision",icon:"✅",key:"approved"},
-  ];
+function Stepper({ status }) {
+  const idx = stepIndex(status);
+  const isRejected = status?.includes("rejected");
   return (
-    <div style={{display:"flex",alignItems:"flex-start",marginBottom:24,padding:"20px 24px",background:"#161922",border:"1px solid #252836",borderRadius:12}}>
-      {steps.map((step,i)=>{
-        const state = getStepState(step.key);
-        const color = state==="done"?"#10B981":state==="active"?"#6366F1":state==="rejected"?"#EF4444":"#2E3347";
-        const textColor = state==="pending"?"#4B5268":state==="rejected"?"#EF4444":state==="done"?"#10B981":"#6366F1";
+    <div style={{display:"flex",alignItems:"flex-start",gap:0,marginBottom:20,background:"#fff",border:"1px solid #E8EBF4",borderRadius:12,padding:"16px 20px"}}>
+      {STEPS.map((s,i)=>{
+        const done   = i < idx;
+        const active = i === idx;
+        const reject = isRejected && active;
+        const color  = reject?"#EF4444":done?"#10B981":active?"#6366F1":"#C8CEDD";
+        const bg     = reject?"#FEF2F2":done?"#ECFDF5":active?"#EEF2FF":"#F7F8FC";
         return (
-          <div key={step.key} style={{flex:1,display:"flex",flexDirection:"column",alignItems:"center",position:"relative"}}>
-            {i<steps.length-1&&<div style={{position:"absolute",top:16,left:"50%",width:"100%",height:2,background:state==="done"?"#10B981":"#252836",zIndex:0}}/>}
-            <div style={{width:32,height:32,borderRadius:"50%",background:color+"20",border:`2px solid ${color}`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:14,position:"relative",zIndex:1}}>{state==="done"?"✓":state==="rejected"?"✕":step.icon}</div>
-            <div style={{fontSize:11,color:textColor,marginTop:6,fontWeight:500,textAlign:"center"}}>{step.label}</div>
+          <div key={s.key} style={{flex:1,display:"flex",flexDirection:"column",alignItems:"center",position:"relative"}}>
+            {i<STEPS.length-1&&<div style={{position:"absolute",top:15,left:"50%",width:"100%",height:2,background:done?"#10B981":"#E8EBF4",zIndex:0}}/>}
+            <div className="step-dot" style={{background:bg,borderColor:color,color:color,zIndex:1,fontSize:reject||done?"14px":"13px"}}>{reject?"✕":done?"✓":s.icon}</div>
+            <div style={{fontSize:10,fontWeight:600,color,marginTop:5,textAlign:"center",lineHeight:1.3}}>{s.label}</div>
           </div>
         );
       })}
@@ -250,66 +321,48 @@ function ApprovalStepper({ status }) {
   );
 }
 
-// ── EMAIL PREVIEW MODAL ──────────────────────────────────────
-function EmailModal({ request, onClose }) {
-  const appUrl = window.location.origin + window.location.pathname;
-  const approveUrl = `${appUrl}?docId=${request.id}&action=approve`;
-  const emailBody = `Hi ${request.managerName},
+// ── EMAIL MODAL ──────────────────────────────────────────────
+function EmailModal({ req, level, onClose }) {
+  const appUrl  = window.location.origin + window.location.pathname;
+  const link    = `${appUrl}?docId=${req.id}&level=${level}`;
+  const mgrName = level===1 ? req.mgr1Name : req.mgr2Name;
+  const mgrEmail= level===1 ? req.mgr1Email : req.mgr2Email;
+  const yearly  = yearlyEquiv(req.costAmount, req.costPeriod);
 
-A procurement request has been submitted by ${request.submitterName} (${request.department}) and requires your approval.
+  const body = `Hi ${mgrName},
 
-━━━━━━━━━━━━━━━━━━━━━━
-REQUEST DETAILS
-━━━━━━━━━━━━━━━━━━━━━━
-Tool Name   : ${request.toolName}
-Vendor      : ${request.toolVendor||"—"}
-Annual Cost : $${parseFloat(request.annualCost||0).toLocaleString()}
-Seats       : ${request.seats||"—"}
-Category    : ${request.toolCategory}
-Urgency     : ${(request.urgency||"normal").toUpperCase()}
+A procurement request requires your approval (Level ${level}).
 
-Justification:
-${request.justification||"—"}
+TOOL       : ${req.toolName}
+VENDOR     : ${req.toolVendor||"—"}
+DEPARTMENT : ${req.department}
+COST       : $${parseFloat(req.costAmount||0).toLocaleString()} / ${req.costPeriod} ($${yearly.toLocaleString()} / year)
+SUBMITTED BY: ${req.submitterName||"—"}
+JUSTIFICATION: ${req.justification||"—"}
 
-━━━━━━━━━━━━━━━━━━━━━━
-APPROVAL LINK
-━━━━━━━━━━━━━━━━━━━━━━
-Click the link below to approve or reject this request:
-
-${approveUrl}
-
-This link is specific to this request. Once you click Approve or Reject, your decision will be recorded permanently.
+CLICK BELOW TO APPROVE OR REJECT:
+${link}
 
 — ProcureIQ System`;
 
-  const mailtoLink = `mailto:${request.managerEmail}?subject=Approval Required: ${request.toolName} — ProcureIQ Request&body=${encodeURIComponent(emailBody)}`;
+  const mailto = `mailto:${mgrEmail}?subject=Action Required: Approve "${req.toolName}" — ProcureIQ&body=${encodeURIComponent(body)}`;
 
   return (
-    <div style={{position:"fixed",inset:0,background:"#00000090",zIndex:1000,display:"flex",alignItems:"center",justifyContent:"center",padding:20}}>
-      <div style={{background:"#161922",border:"1px solid #252836",borderRadius:14,width:"100%",maxWidth:580,maxHeight:"90vh",overflow:"auto"}}>
-        <div style={{padding:"20px 24px",borderBottom:"1px solid #1E2130",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-          <div>
-            <div style={{fontWeight:600,fontSize:16}}>📧 Send Approval Email</div>
-            <div style={{fontSize:12,color:"#6B7094",marginTop:2}}>To: {request.managerName} ({request.managerEmail})</div>
-          </div>
-          <button className="btn" style={{background:"#1A1D27",color:"#9CA3C0",padding:"6px 12px",fontSize:13}} onClick={onClose}>✕</button>
+    <div className="modal-bg" onClick={onClose}>
+      <div className="card" style={{width:"100%",maxWidth:520,maxHeight:"90vh",overflow:"auto"}} onClick={e=>e.stopPropagation()}>
+        <div style={{padding:"18px 22px",borderBottom:"1px solid #E8EBF4",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+          <div><div style={{fontWeight:700,fontSize:15}}>📧 Send Approval Email — Manager {level}</div><div style={{fontSize:12,color:"#6B7494",marginTop:2}}>To: {mgrName} ({mgrEmail})</div></div>
+          <button className="btn" style={{background:"#F7F8FC",color:"#6B7494",padding:"6px 10px"}} onClick={onClose}>✕</button>
         </div>
-        <div style={{padding:24}}>
-          <div style={{marginBottom:16}}>
-            <label style={{marginBottom:8}}>Email Preview</label>
-            <div className="email-box">{emailBody}</div>
-          </div>
-          <div style={{background:"#1A1D27",border:"1px solid #2E3347",borderRadius:8,padding:12,marginBottom:16,fontSize:12,color:"#6B7094"}}>
-            <strong style={{color:"#F59E0B"}}>📎 Approval Link:</strong><br/>
-            <span style={{color:"#6366F1",wordBreak:"break-all"}}>{approveUrl}</span>
-          </div>
-          <div style={{display:"flex",gap:10}}>
-            <a href={mailtoLink} style={{flex:1,textDecoration:"none"}}>
-              <button className="btn" style={{background:"#6366F1",color:"white",padding:"11px",fontSize:14,width:"100%"}}>📧 Open in Email Client</button>
+        <div style={{padding:22}}>
+          <div style={{background:"#F7F8FC",border:"1px solid #E8EBF4",borderRadius:8,padding:14,fontFamily:"monospace",fontSize:12,color:"#4B5268",whiteSpace:"pre-wrap",marginBottom:14,lineHeight:1.7}}>{body}</div>
+          <div style={{background:"#EEF2FF",padding:"10px 14px",borderRadius:8,marginBottom:14,fontSize:12,color:"#6366F1"}}>🔗 <strong>Approval Link:</strong> <span style={{wordBreak:"break-all"}}>{link}</span></div>
+          <div style={{display:"flex",gap:8}}>
+            <a href={mailto} style={{flex:1,textDecoration:"none"}} target="_blank">
+              <button className="btn" style={{background:"#6366F1",color:"#fff",padding:"10px",fontSize:13,width:"100%",justifyContent:"center"}}>📧 Open in Email Client</button>
             </a>
-            <button className="btn" style={{background:"#1A1D27",color:"#9CA3C0",padding:"11px 16px",fontSize:14}} onClick={()=>{navigator.clipboard.writeText(approveUrl);}} title="Copy approval link">📋 Copy Link</button>
+            <button className="btn" style={{background:"#F7F8FC",color:"#6B7494",padding:"10px 14px"}} onClick={()=>navigator.clipboard?.writeText(link).then(()=>alert("Link copied!"))}>📋 Copy</button>
           </div>
-          <div style={{marginTop:10,fontSize:11,color:"#4B5268",textAlign:"center"}}>The manager clicks the link → opens a page → approves or rejects directly</div>
         </div>
       </div>
     </div>
@@ -317,268 +370,379 @@ This link is specific to this request. Once you click Approve or Reject, your de
 }
 
 // ── MAIN APP ─────────────────────────────────────────────────
-function App() {
-  const [view, setView]               = useState("dashboard");
-  const [submissions, setSubmissions] = useState([]);
-  const [loading, setLoading]         = useState(true);
-  const [form, setForm]               = useState(initialForm);
-  const [selectedIds, setSelectedIds] = useState([]);
-  const [detailId, setDetailId]       = useState(null);
-  const [filterStatus, setFilterStatus] = useState("all");
-  const [toast, setToast]             = useState(null);
-  const [approvalNote, setApprovalNote] = useState("");
-  const [sortBy, setSortBy]           = useState("date");
-  const [searchQuery, setSearchQuery] = useState("");
-  const [saving, setSaving]           = useState(false);
-  const [editId, setEditId]             = useState(null);
-  const [emailModal, setEmailModal]   = useState(null);
-  const toastTimer = useRef(null);
+function App({ user, onLogout }) {
+  const [view, setView]           = useState("dashboard");
+  const [subs, setSubs]           = useState([]);
+  const [loading, setLoading]     = useState(true);
+  const [form, setForm]           = useState(initialForm);
+  const [editId, setEditId]       = useState(null);
+  const [detailId, setDetailId]   = useState(null);
+  const [filter, setFilter]       = useState("all");
+  const [deptFilter, setDeptFilter] = useState("all");
+  const [billingFilter, setBilling] = useState("all");
+  const [search, setSearch]       = useState("");
+  const [toast, setToast]         = useState(null);
+  const [saving, setSaving]       = useState(false);
+  const [emailModal, setEmailModal]= useState(null);
+  const [procNote, setProcNote]   = useState("");
+  const [procStatus, setProcStatus]= useState("");
+  const [mgrNote, setMgrNote]     = useState("");
+  const [deleteConfirm, setDeleteConfirm] = useState(null);
+  const toastRef = useRef(null);
 
-  useEffect(() => {
-    const unsub = db.collection("procurements")
-      .orderBy("submittedAt","desc")
-      .onSnapshot(
-        snap => { setSubmissions(snap.docs.map(d=>({id:d.id,...d.data()}))); setLoading(false); },
-        err  => { showToast("DB Error: "+err.message,"error"); setLoading(false); }
-      );
+  useEffect(()=>{
+    const unsub = db.collection("procurements").orderBy("submittedAt","desc")
+      .onSnapshot(snap=>{ setSubs(snap.docs.map(d=>({id:d.id,...d.data()}))); setLoading(false); },
+        err=>{ showToast("DB Error: "+err.message,"error"); setLoading(false); });
     return ()=>unsub();
   },[]);
 
   const showToast = (msg,type="success") => {
     setToast({msg,type});
-    clearTimeout(toastTimer.current);
-    toastTimer.current = setTimeout(()=>setToast(null),4000);
+    clearTimeout(toastRef.current);
+    toastRef.current = setTimeout(()=>setToast(null),4000);
   };
 
+  const logEntry = (action,note="") => ({
+    action, by:user.name, role:user.role, note,
+    at: new Date().toISOString(),
+    date: new Date().toLocaleDateString("en-IN",{day:"2-digit",month:"short",year:"numeric"}),
+    time: new Date().toLocaleTimeString("en-IN",{hour:"2-digit",minute:"2-digit"}),
+  });
+
+  // ── SUBMIT / EDIT ──
   const submitForm = async () => {
-    if (!form.submitterName||!form.toolName||!form.annualCost){showToast("Fill in Name, Tool Name and Cost.","error");return;}
-    if (!form.managerName||!form.managerEmail){showToast("Please enter your Manager's name and email.","error");return;}
+    if (!form.toolName||!form.costAmount){showToast("Tool name and cost are required.","error");return;}
+    if (!form.mgr1Name||!form.mgr1Email){showToast("Manager 1 details are required.","error");return;}
+    if (!form.mgr2Name||!form.mgr2Email){showToast("Manager 2 details are required.","error");return;}
     setSaving(true);
     try {
       if (editId) {
-        // EDIT MODE — only allowed while still pending manager review
+        const orig = subs.find(s=>s.id===editId);
+        const canEdit = ["mgr1-rejected","mgr2-rejected","rejected","draft"].includes(orig?.status);
+        if (!canEdit){showToast("Cannot edit — request is in active review.","error");setSaving(false);return;}
         await db.collection("procurements").doc(editId).update({
-          ...form,
+          ...form, status:"mgr1-pending",
           updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
-          auditLog: firebase.firestore.FieldValue.arrayUnion({action:"Edited",by:form.submitterName,at:new Date().toISOString(),note:"Request details updated before manager review"}),
+          auditLog: firebase.firestore.FieldValue.arrayUnion(logEntry("Edited & Resubmitted","Request updated after rejection")),
         });
-        setForm(initialForm); setEditId(null); setView("dashboard");
-        showToast("Request updated successfully!");
+        setEditId(null); setForm(initialForm); setView("dashboard");
+        showToast("Request updated and resubmitted!");
       } else {
-        // NEW SUBMISSION
         const ref = await db.collection("procurements").add({
-          ...form, status:"manager-review",
+          ...form, status:"mgr1-pending",
+          submitterName: user.name, submitterEmail: user.email, submitterRole: user.role,
           submittedAt: firebase.firestore.FieldValue.serverTimestamp(),
-          auditLog:[{action:"Submitted",by:form.submitterName,at:new Date().toISOString(),note:"Awaiting manager approval"}],
+          auditLog:[logEntry("Request Created","Awaiting Manager 1 approval")],
+          procurementStatus: "",
         });
-        const newDoc = {id:ref.id,...form};
-        setForm(initialForm);
-        setView("dashboard");
-        showToast("Request submitted! Now send the approval email to your manager.");
-        setTimeout(()=>setEmailModal(newDoc),600);
+        const newDoc = {id:ref.id,...form,submitterName:user.name};
+        setForm(initialForm); setView("dashboard");
+        showToast("Submitted! Send approval email to Manager 1.");
+        setTimeout(()=>setEmailModal({req:newDoc,level:1}),500);
       }
     } catch(e){showToast("Error: "+e.message,"error");}
     setSaving(false);
   };
 
   const startEdit = (s) => {
+    const canEdit = ["mgr1-rejected","mgr2-rejected","rejected","draft"].includes(s.status);
+    if (!canEdit){showToast("Cannot edit — request is in active review.","error");return;}
     setForm({
-      submitterName:s.submitterName||"", submitterEmail:s.submitterEmail||"", department:s.department||"",
-      managerName:s.managerName||"", managerEmail:s.managerEmail||"",
       toolName:s.toolName||"", toolVendor:s.toolVendor||"", toolCategory:s.toolCategory||"Productivity",
-      annualCost:s.annualCost||"", costPeriod:s.costPeriod||"monthly", seats:s.seats||"", justification:s.justification||"",
-      alternatives:s.alternatives||[{name:"",vendor:"",annualCost:"",notes:""}],
-      urgency:s.urgency||"normal",
+      department:s.department||"Engineering", costAmount:s.costAmount||"", costPeriod:s.costPeriod||"monthly",
+      seats:s.seats||"", justification:s.justification||"", urgency:s.urgency||"normal",
+      mgr1Name:s.mgr1Name||"", mgr1Email:s.mgr1Email||"",
+      mgr2Name:s.mgr2Name||"", mgr2Email:s.mgr2Email||"",
+      alternatives:s.alternatives||[{name:"",vendor:"",cost:"",notes:""}],
     });
-    setEditId(s.id);
-    setDetailId(null);
-    setView("submit");
+    setEditId(s.id); setDetailId(null); setView("submit");
   };
 
-  const procurementAction = async (id,approved,note="") => {
+  // ── PROCUREMENT ACTIONS ──
+  const procurementDecide = async (id, approved, note="") => {
     try {
-      const s = submissions.find(x=>x.id===id);
-      const newStatus = approved?"approved":"rejected";
       await db.collection("procurements").doc(id).update({
-        status: newStatus,
-        auditLog: firebase.firestore.FieldValue.arrayUnion({
-          action: approved?"Procurement Approved":"Procurement Rejected",
-          by:"Procurement Team", at:new Date().toISOString(), note
-        }),
-        updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+        status: approved?"approved":"rejected",
+        auditLog: firebase.firestore.FieldValue.arrayUnion(logEntry(approved?"Procurement Approved":"Procurement Rejected", note)),
+        updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
       });
-      setApprovalNote("");
-      showToast(approved?"✓ Finally Approved!":"Request Rejected.");
+      setProcNote(""); showToast(approved?"✓ Approved!":"Rejected.");
     } catch(e){showToast("Error: "+e.message,"error");}
   };
 
-  const detail = submissions.find(s=>s.id===detailId);
-  const filtered = submissions
-    .filter(s=>filterStatus==="all"||s.status===filterStatus)
-    .filter(s=>!searchQuery||s.toolName?.toLowerCase().includes(searchQuery.toLowerCase())||s.submitterName?.toLowerCase().includes(searchQuery.toLowerCase()))
-    .sort((a,b)=>sortBy==="cost"?parseFloat(b.annualCost||0)-parseFloat(a.annualCost||0):sortBy==="tool"?(a.toolName||"").localeCompare(b.toolName||""):0);
-  const compareList = submissions.filter(s=>selectedIds.includes(s.id));
-  const stats={
-    total:submissions.length,
-    pending:submissions.filter(s=>s.status==="manager-review").length,
-    procurement:submissions.filter(s=>s.status==="procurement-review").length,
-    approved:submissions.filter(s=>s.status==="approved").length,
-    rejected:submissions.filter(s=>s.status==="manager-rejected"||s.status==="rejected").length,
-    totalCost:submissions.filter(s=>s.status==="approved").reduce((sum,s)=>sum+(parseFloat(s.annualCost)||0),0),
+  const setProcurementStatus = async (id, status) => {
+    try {
+      await db.collection("procurements").doc(id).update({
+        procurementStatus: status,
+        auditLog: firebase.firestore.FieldValue.arrayUnion(logEntry("Procurement Status Updated", status)),
+        updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
+      });
+      showToast("Status updated!");
+    } catch(e){showToast("Error: "+e.message,"error");}
   };
-  const nav=v=>{setView(v);setDetailId(null);};
+
+  // ── DELETE ──
+  const deleteRequest = async (id) => {
+    if (user.role!=="admin"&&user.role!=="procurement"){showToast("You don't have permission to delete.","error");return;}
+    try {
+      await db.collection("procurements").doc(id).delete();
+      setDeleteConfirm(null); setDetailId(null);
+      showToast("Request deleted.");
+    } catch(e){showToast("Error: "+e.message,"error");}
+  };
+
+  const detail = subs.find(s=>s.id===detailId);
+
+  const filtered = useMemo(()=> subs
+    .filter(s=>filter==="all"||s.status===filter)
+    .filter(s=>deptFilter==="all"||s.department===deptFilter)
+    .filter(s=>billingFilter==="all"||s.costPeriod===billingFilter)
+    .filter(s=>!search||s.toolName?.toLowerCase().includes(search.toLowerCase())||s.submitterName?.toLowerCase().includes(search.toLowerCase())||s.department?.toLowerCase().includes(search.toLowerCase()))
+  ,[subs,filter,deptFilter,billingFilter,search]);
+
+  const stats = useMemo(()=>({
+    total:      subs.length,
+    mgr1:       subs.filter(s=>s.status==="mgr1-pending").length,
+    mgr2:       subs.filter(s=>s.status==="mgr2-pending").length,
+    procurement:subs.filter(s=>s.status==="procurement-review").length,
+    approved:   subs.filter(s=>s.status==="approved").length,
+    rejected:   subs.filter(s=>s.status?.includes("rejected")).length,
+    yearlyTotal:subs.filter(s=>s.status==="approved").reduce((t,s)=>t+yearlyEquiv(s.costAmount,s.costPeriod),0),
+    byDept:     DEPARTMENTS.reduce((acc,d)=>({...acc,[d]:subs.filter(s=>s.department===d&&s.status==="approved").reduce((t,s)=>t+yearlyEquiv(s.costAmount,s.costPeriod),0)}),{}),
+  }),[subs]);
+
+  const canDelete   = user.role==="admin"||user.role==="procurement";
+  const canApprove  = user.role==="procurement"||user.role==="admin";
+  const isEmployee  = user.role==="employee";
+  const nav = v => { setView(v); setDetailId(null); };
+
+  const SF = { // sidebar fixed
+    sidebar:{width:220,background:"#fff",borderRight:"1px solid #E8EBF4",display:"flex",flexDirection:"column",padding:"16px 10px",flexShrink:0,boxShadow:"2px 0 8px rgba(0,0,0,0.03)"},
+    main:{flex:1,overflow:"auto",padding:"24px 28px"},
+  };
 
   return (
-    <div style={{fontFamily:"'DM Sans','Segoe UI',sans-serif",background:"#0F1117",minHeight:"100vh",color:"#E8EAF0",display:"flex",height:"100vh",overflow:"hidden"}}>
-      <style>{css}</style>
+    <div style={{fontFamily:"'Inter','Segoe UI',sans-serif",background:"#F4F6FA",minHeight:"100vh",display:"flex",height:"100vh",overflow:"hidden"}}>
+      <style>{G}</style>
 
-      {/* Sidebar */}
-      <div style={{width:224,background:"#0D0F18",borderRight:"1px solid #1E2130",display:"flex",flexDirection:"column",padding:"20px 10px",flexShrink:0}}>
-        <div style={{padding:"0 8px 20px",borderBottom:"1px solid #1E2130"}}>
-          <div style={{display:"flex",alignItems:"center",gap:10}}>
-            <div style={{width:32,height:32,background:"linear-gradient(135deg,#6366F1,#8B5CF6)",borderRadius:8,display:"flex",alignItems:"center",justifyContent:"center",fontSize:16}}>⚙</div>
-            <div><div style={{fontSize:14,fontWeight:600,color:"#E8EAF0"}}>ProcureIQ</div><div style={{fontSize:11,color:"#4B5268",display:"flex",alignItems:"center",gap:5}}><span className="live-dot"/> Firebase Live</div></div>
+      {/* SIDEBAR */}
+      <div style={SF.sidebar}>
+        <div style={{padding:"0 6px 16px",borderBottom:"1px solid #E8EBF4",marginBottom:10}}>
+          <div style={{display:"flex",alignItems:"center",gap:9}}>
+            <div style={{width:32,height:32,background:"linear-gradient(135deg,#6366F1,#8B5CF6)",borderRadius:8,display:"flex",alignItems:"center",justifyContent:"center",fontSize:15}}>⚙</div>
+            <div><div style={{fontSize:13,fontWeight:700,color:"#1A1D2E"}}>ProcureIQ</div><div style={{fontSize:10,color:"#A0A8C0"}}>v2.0</div></div>
+          </div>
+          <div style={{marginTop:10,padding:"8px 10px",background:"#F7F8FC",borderRadius:8}}>
+            <div style={{fontSize:11,fontWeight:700,color:ROLES[user.role]?.color}}>{ROLES[user.role]?.icon} {ROLES[user.role]?.label}</div>
+            <div style={{fontSize:12,color:"#1A1D2E",fontWeight:500,marginTop:1}}>{user.name}</div>
+            <div style={{fontSize:11,color:"#A0A8C0"}}>{user.email}</div>
           </div>
         </div>
-        <nav style={{flex:1,marginTop:14,display:"flex",flexDirection:"column",gap:2}}>
-          {[["dashboard","📊","Dashboard"],["submit","✚","New Request"],["compare","⚖","Compare Tools"],["audit","📋","Audit Trail"]].map(([v,icon,label])=>(
+        <nav style={{flex:1,display:"flex",flexDirection:"column",gap:2}}>
+          {[["dashboard","📊","Dashboard"],["submit","✚","New Request"],["billing","💳","Billing Tracker"],["audit","📋","Audit Logs"],["compare","⚖","Compare"]].map(([v,ic,lb])=>(
+            (!isEmployee||(v!=="audit")) && (
             <div key={v} className={`nav-item${view===v?" active":""}`} onClick={()=>nav(v)}>
-              <span style={{fontSize:15}}>{icon}</span>{label}
-              {v==="dashboard"&&stats.pending>0&&<span style={{marginLeft:"auto",background:"#F59E0B",color:"#0D0F18",borderRadius:10,fontSize:11,padding:"1px 7px",fontWeight:700}}>{stats.pending}</span>}
-              {v==="dashboard"&&stats.procurement>0&&<span style={{marginLeft:stats.pending>0?"4px":"auto",background:"#6366F1",color:"white",borderRadius:10,fontSize:11,padding:"1px 7px",fontWeight:700}}>{stats.procurement}</span>}
+              <span>{ic}</span>{lb}
+              {v==="dashboard"&&stats.mgr1>0&&<span style={{marginLeft:"auto",background:"#F59E0B",color:"#fff",borderRadius:10,fontSize:10,padding:"1px 6px",fontWeight:700}}>{stats.mgr1}</span>}
+              {v==="dashboard"&&stats.procurement>0&&<span style={{marginLeft:2,background:"#0EA5E9",color:"#fff",borderRadius:10,fontSize:10,padding:"1px 6px",fontWeight:700}}>{stats.procurement}</span>}
             </div>
+            )
           ))}
         </nav>
-        <div style={{padding:"14px 8px 0",borderTop:"1px solid #1E2130",fontSize:12,color:"#4B5268"}}>
-          <div style={{display:"flex",justifyContent:"space-between",marginBottom:4}}><span>Total</span><span style={{color:"#E8EAF0"}}>{stats.total}</span></div>
-          <div style={{display:"flex",justifyContent:"space-between",marginBottom:4}}><span>Awaiting Manager</span><span style={{color:"#F59E0B"}}>{stats.pending}</span></div>
-          <div style={{display:"flex",justifyContent:"space-between",marginBottom:4}}><span>Awaiting Procurement</span><span style={{color:"#6366F1"}}>{stats.procurement}</span></div>
-          <div style={{display:"flex",justifyContent:"space-between",marginBottom:4}}><span>Approved</span><span style={{color:"#10B981"}}>{stats.approved}</span></div>
-          <div style={{marginTop:8,color:"#10B981",fontWeight:500}}>${stats.totalCost.toLocaleString()} approved/yr</div>
+        <div style={{borderTop:"1px solid #E8EBF4",paddingTop:12}}>
+          <button className="btn" style={{background:"#FEF2F2",color:"#EF4444",padding:"8px 12px",width:"100%",justifyContent:"center",fontSize:12}} onClick={onLogout}>← Switch Role</button>
         </div>
       </div>
 
-      {/* Main */}
-      <div style={{flex:1,overflow:"auto",padding:"28px 32px"}}>
+      {/* MAIN */}
+      <div style={SF.main}>
 
-        {/* DASHBOARD */}
+        {/* ── DASHBOARD ── */}
         {view==="dashboard"&&!detailId&&(
           <div>
-            <div style={{marginBottom:24}}><h1 style={{fontSize:24,fontWeight:600,color:"#F0F2FA"}}>Procurement Dashboard</h1><p style={{fontSize:13,color:"#6B7094",marginTop:3}}>Two-stage approval: Manager → Procurement</p></div>
-            <div style={{display:"grid",gridTemplateColumns:"repeat(5,1fr)",gap:12,marginBottom:24}}>
-              {[["Total",stats.total,"#6366F1","📁"],["Mgr. Pending",stats.pending,"#F59E0B","👤"],["Proc. Pending",stats.procurement,"#8B5CF6","🏢"],["Approved",stats.approved,"#10B981","✓"],["Rejected",stats.rejected,"#EF4444","✕"]].map(([label,value,color,icon])=>(
-                <div key={label} className="card" style={{padding:"16px 18px"}}><div style={{fontSize:18,marginBottom:6}}>{icon}</div><div style={{fontSize:24,fontWeight:600,color}}>{value}</div><div style={{fontSize:11,color:"#6B7094",marginTop:2}}>{label}</div></div>
+            <div style={{marginBottom:20,display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
+              <div><h1 style={{fontSize:22,fontWeight:700,color:"#1A1D2E"}}>Dashboard</h1><p style={{fontSize:13,color:"#6B7494",marginTop:2}}>Requester → Manager 1 → Manager 2 → Procurement</p></div>
+              <button className="btn" style={{background:"#6366F1",color:"#fff",padding:"9px 16px",fontSize:13}} onClick={()=>nav("submit")}>+ New Request</button>
+            </div>
+
+            {/* Stats */}
+            <div style={{display:"grid",gridTemplateColumns:"repeat(6,1fr)",gap:10,marginBottom:20}}>
+              {[["Total",stats.total,"#6366F1","📁"],["Mgr 1",stats.mgr1,"#F59E0B","👔"],["Mgr 2",stats.mgr2,"#8B5CF6","👔"],["Procurement",stats.procurement,"#0EA5E9","🏢"],["Approved",stats.approved,"#10B981","✓"],["Rejected",stats.rejected,"#EF4444","✕"]].map(([l,v,c,ic])=>(
+                <div key={l} className="card" style={{padding:"14px 16px",borderTop:`3px solid ${c}`}}>
+                  <div style={{fontSize:16,marginBottom:4}}>{ic}</div>
+                  <div style={{fontSize:22,fontWeight:700,color:c}}>{v}</div>
+                  <div style={{fontSize:11,color:"#A0A8C0",marginTop:1}}>{l}</div>
+                </div>
               ))}
             </div>
+            <div className="card" style={{padding:"12px 16px",marginBottom:16,display:"flex",gap:16,alignItems:"center",flexWrap:"wrap"}}>
+              <span style={{fontSize:13,color:"#6B7494"}}>💰 Approved yearly spend:</span>
+              <span style={{fontSize:16,fontWeight:700,color:"#10B981"}}>${stats.yearlyTotal.toLocaleString()}</span>
+            </div>
+
+            {/* Filters */}
             <div className="card" style={{overflow:"hidden"}}>
-              <div style={{padding:"16px 20px",borderBottom:"1px solid #1E2130",display:"flex",alignItems:"center",gap:10,flexWrap:"wrap"}}>
-                <input className="inp" style={{width:180}} placeholder="Search…" value={searchQuery} onChange={e=>setSearchQuery(e.target.value)}/>
-                <div style={{display:"flex",gap:5,flexWrap:"wrap"}}>
-                  {[["all","All"],["manager-review","Mgr. Review"],["procurement-review","Proc. Review"],["approved","Approved"],["manager-rejected","Mgr. Rejected"],["rejected","Proc. Rejected"]].map(([s,l])=>(
-                    <div key={s} className={`tab${filterStatus===s?" active":""}`} onClick={()=>setFilterStatus(s)}>{l}</div>
+              <div style={{padding:"12px 16px",borderBottom:"1px solid #F0F2F8",display:"flex",gap:8,flexWrap:"wrap",alignItems:"center"}}>
+                <input className="inp" style={{width:180}} placeholder="Search tool, person, dept…" value={search} onChange={e=>setSearch(e.target.value)}/>
+                <select className="inp" style={{width:140}} value={deptFilter} onChange={e=>setDeptFilter(e.target.value)}>
+                  <option value="all">All Departments</option>
+                  {DEPARTMENTS.map(d=><option key={d}>{d}</option>)}
+                </select>
+                <select className="inp" style={{width:120}} value={billingFilter} onChange={e=>setBilling(e.target.value)}>
+                  <option value="all">All Billing</option>
+                  <option value="monthly">Monthly</option>
+                  <option value="yearly">Yearly</option>
+                </select>
+                <div style={{display:"flex",gap:4,flexWrap:"wrap"}}>
+                  {[["all","All"],["mgr1-pending","Mgr 1"],["mgr2-pending","Mgr 2"],["procurement-review","Procurement"],["approved","Approved"],["mgr1-rejected","Rejected"]].map(([s,l])=>(
+                    <div key={s} className={`tab${filter===s?" active":""}`} onClick={()=>setFilter(s)}>{l}</div>
                   ))}
                 </div>
-                <div style={{marginLeft:"auto"}}><select className="inp" style={{width:110}} value={sortBy} onChange={e=>setSortBy(e.target.value)}><option value="date">Latest</option><option value="cost">Cost</option><option value="tool">Name</option></select></div>
               </div>
-              {loading?(<div style={{padding:60,textAlign:"center",color:"#4B5268"}}><div style={{fontSize:32,marginBottom:12}}>⏳</div>Connecting…</div>)
-              :filtered.length===0?(<div style={{padding:60,textAlign:"center",color:"#4B5268"}}><div style={{fontSize:36,marginBottom:12}}>📭</div><div style={{fontSize:14}}>No requests. <span style={{color:"#6366F1",cursor:"pointer"}} onClick={()=>setView("submit")}>Submit one →</span></div></div>)
+              {loading?(<div style={{padding:60,textAlign:"center",color:"#A0A8C0"}}><div style={{fontSize:28,marginBottom:8}}>⏳</div>Connecting…</div>)
+              :filtered.length===0?(<div style={{padding:60,textAlign:"center",color:"#A0A8C0"}}><div style={{fontSize:32,marginBottom:8}}>📭</div><div>No requests found. <span style={{color:"#6366F1",cursor:"pointer"}} onClick={()=>nav("submit")}>Create one →</span></div></div>)
               :(
-                <table style={{width:"100%",borderCollapse:"collapse"}}>
-                  <thead><tr style={{background:"#0F1117"}}>{["","Tool","Dept","Manager","Cost","Submitted","Status","Actions"].map((h,i)=><th key={i} style={{padding:"11px 12px",fontSize:10,fontWeight:600,color:"#4B5268",textAlign:"left",textTransform:"uppercase",letterSpacing:"0.07em",whiteSpace:"nowrap"}}>{h}</th>)}</tr></thead>
-                  <tbody>
-                    {filtered.map(s=>{
-                      const sc=STATUS_CONFIG[s.status]||STATUS_CONFIG.pending;
-                      return(<tr key={s.id} className="row-hover" style={{borderTop:"1px solid #1A1D27"}} onClick={()=>setDetailId(s.id)}>
-                        <td style={{padding:"10px 8px 10px 12px"}}><input type="checkbox" checked={selectedIds.includes(s.id)} onChange={e=>{e.stopPropagation();setSelectedIds(prev=>prev.includes(s.id)?prev.filter(x=>x!==s.id):[...prev,s.id]);}} onClick={e=>e.stopPropagation()}/></td>
-                        <td style={{padding:"10px 12px"}}><div style={{fontWeight:500,fontSize:13}}>{s.toolName}</div><div style={{fontSize:11,color:"#6B7094"}}>{s.submitterName}</div></td>
-                        <td style={{padding:"10px 12px",fontSize:12,color:"#9CA3C0"}}>{s.department}</td>
-                        <td style={{padding:"10px 12px"}}><div style={{fontSize:12,fontWeight:500}}>{s.managerName}</div><div style={{fontSize:11,color:"#6B7094"}}>{s.managerEmail}</div></td>
-                        <td style={{padding:"10px 12px",fontFamily:"monospace",fontSize:12,fontWeight:500}}>${parseFloat(s.annualCost||0).toLocaleString()}<span style={{fontSize:9,color:"#4B5268",marginLeft:3}}>{s.costPeriod==="monthly"?"/mo":"/yr"}</span></td>
-                        <td style={{padding:"10px 12px",fontSize:11,color:"#6B7094",whiteSpace:"nowrap"}}>{formatDate(s.submittedAt)}</td>
-                        <td style={{padding:"10px 12px"}}><span className="badge" style={{background:sc.bg,color:sc.color}}><span style={{width:6,height:6,borderRadius:"50%",background:sc.dot}}/>{sc.label}</span></td>
-                        <td style={{padding:"10px 12px"}} onClick={e=>e.stopPropagation()}>
-                          <div style={{display:"flex",gap:5}}>
-                            {s.status==="manager-review"&&<><button className="btn" style={{background:"#1E2B3A",color:"#6366F1",padding:"4px 10px",fontSize:11}} onClick={(e)=>{e.stopPropagation();setEmailModal(s);}}>📧</button><button className="btn" style={{background:"#2A2510",color:"#F59E0B",padding:"4px 10px",fontSize:11}} onClick={(e)=>{e.stopPropagation();startEdit(s);}}>✏️</button></>}
-                            {s.status==="procurement-review"&&<><button className="btn" style={{background:"#1E3A2F",color:"#10B981",padding:"4px 10px",fontSize:11}} onClick={()=>procurementAction(s.id,true)}>✓</button><button className="btn" style={{background:"#3A1E1E",color:"#EF4444",padding:"4px 10px",fontSize:11}} onClick={()=>procurementAction(s.id,false)}>✕</button></>}
-                          </div>
-                        </td>
-                      </tr>);
-                    })}
-                  </tbody>
-                </table>
+                <div style={{overflowX:"auto"}}>
+                  <table style={{width:"100%",borderCollapse:"collapse",minWidth:800}}>
+                    <thead><tr style={{background:"#F7F8FC"}}>
+                      {["","Tool","Dept","Cost","Billing","Manager 1","Manager 2","Submitted","Status","Actions"].map((h,i)=>(
+                        <th key={i} style={{padding:"10px 12px",fontSize:10,fontWeight:700,color:"#A0A8C0",textAlign:"left",textTransform:"uppercase",letterSpacing:"0.07em",whiteSpace:"nowrap"}}>{h}</th>
+                      ))}
+                    </tr></thead>
+                    <tbody>
+                      {filtered.map((s,ri)=>{
+                        const sc = STATUS_CFG[s.status]||STATUS_CFG["draft"];
+                        const yearly = yearlyEquiv(s.costAmount,s.costPeriod);
+                        return(
+                          <tr key={s.id} className="row-tr" style={{borderTop:"1px solid #F0F2F8",background:ri%2===0?"#fff":"#FAFBFE"}} onClick={()=>setDetailId(s.id)}>
+                            <td style={{padding:"10px 8px 10px 12px"}}><input type="checkbox" onClick={e=>e.stopPropagation()}/></td>
+                            <td style={{padding:"10px 12px"}}><div style={{fontWeight:600,fontSize:13,color:"#1A1D2E"}}>{s.toolName}</div><div style={{fontSize:11,color:"#A0A8C0"}}>{s.toolVendor}</div></td>
+                            <td style={{padding:"10px 12px",fontSize:12,color:"#6B7494"}}>{s.department}</td>
+                            <td style={{padding:"10px 12px",fontFamily:"monospace",fontSize:12,fontWeight:600,color:"#1A1D2E"}}>${parseFloat(s.costAmount||0).toLocaleString()}<div style={{fontSize:10,color:"#A0A8C0"}}>${yearly.toLocaleString()}/yr</div></td>
+                            <td style={{padding:"10px 12px"}}><span style={{padding:"2px 8px",borderRadius:6,fontSize:11,fontWeight:600,background:s.costPeriod==="monthly"?"#EEF2FF":"#F0FDF4",color:s.costPeriod==="monthly"?"#6366F1":"#10B981"}}>{s.costPeriod==="monthly"?"Monthly":"Yearly"}</span></td>
+                            <td style={{padding:"10px 12px",fontSize:12}}><div style={{fontWeight:500}}>{s.mgr1Name}</div><div style={{fontSize:10,color:"#A0A8C0"}}>{s.mgr1Email}</div></td>
+                            <td style={{padding:"10px 12px",fontSize:12}}><div style={{fontWeight:500}}>{s.mgr2Name}</div><div style={{fontSize:10,color:"#A0A8C0"}}>{s.mgr2Email}</div></td>
+                            <td style={{padding:"10px 12px",fontSize:11,color:"#A0A8C0",whiteSpace:"nowrap"}}>{formatDT(s.submittedAt)}</td>
+                            <td style={{padding:"10px 12px"}}><span className="badge" style={{background:sc.bg,color:sc.color,fontSize:11}}>{sc.label}</span>{s.procurementStatus&&<div style={{fontSize:10,marginTop:3,color:PROC_STATUSES.find(p=>p.value===s.procurementStatus)?.color||"#A0A8C0"}}>{PROC_STATUSES.find(p=>p.value===s.procurementStatus)?.label}</div>}</td>
+                            <td style={{padding:"10px 12px"}} onClick={e=>e.stopPropagation()}>
+                              <div style={{display:"flex",gap:4",flexWrap:"wrap"}}>
+                                {s.status==="mgr1-pending"&&<button className="btn" style={{background:"#EEF2FF",color:"#6366F1",padding:"4px 8px",fontSize:11}} onClick={()=>setEmailModal({req:s,level:1})}>📧 Mgr1</button>}
+                                {s.status==="mgr2-pending"&&<button className="btn" style={{background:"#F5F3FF",color:"#8B5CF6",padding:"4px 8px",fontSize:11}} onClick={()=>setEmailModal({req:s,level:2})}>📧 Mgr2</button>}
+                                {canApprove&&s.status==="procurement-review"&&<><button className="btn" style={{background:"#ECFDF5",color:"#10B981",padding:"4px 8px",fontSize:11}} onClick={()=>procurementDecide(s.id,true)}>✓</button><button className="btn" style={{background:"#FEF2F2",color:"#EF4444",padding:"4px 8px",fontSize:11}} onClick={()=>procurementDecide(s.id,false)}>✕</button></>}
+                                {(s.status?.includes("rejected"))&&(user.role==="employee"||user.role==="admin")&&<button className="btn" style={{background:"#FFFBEB",color:"#F59E0B",padding:"4px 8px",fontSize:11}} onClick={()=>startEdit(s)}>✏️</button>}
+                                {canDelete&&<button className="btn" style={{background:"#FEF2F2",color:"#EF4444",padding:"4px 8px",fontSize:11}} onClick={()=>setDeleteConfirm(s.id)}>🗑</button>}
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
               )}
             </div>
-            {selectedIds.length>=2&&(<div style={{marginTop:14,padding:"12px 18px",background:"#1E2130",borderRadius:10,display:"flex",alignItems:"center",gap:10}}>
-              <span style={{fontSize:13,color:"#9CA3C0"}}>{selectedIds.length} selected</span>
-              <button className="btn" style={{background:"#6366F1",color:"white",padding:"7px 16px",fontSize:13}} onClick={()=>setView("compare")}>⚖ Compare</button>
-              <button className="btn" style={{background:"#1A1D27",color:"#6B7094",padding:"7px 12px",fontSize:13}} onClick={()=>setSelectedIds([])}>Clear</button>
-            </div>)}
           </div>
         )}
 
-        {/* DETAIL */}
+        {/* ── DETAIL ── */}
         {view==="dashboard"&&detailId&&detail&&(
           <div>
-            <button className="btn" style={{background:"#1A1D27",color:"#9CA3C0",padding:"7px 14px",fontSize:13,marginBottom:20}} onClick={()=>setDetailId(null)}>← Back</button>
-            <ApprovalStepper status={detail.status}/>
-            <div style={{display:"grid",gridTemplateColumns:"1fr 320px",gap:18}}>
+            <button className="btn" style={{background:"#F7F8FC",color:"#6B7494",padding:"7px 14px",marginBottom:18}} onClick={()=>setDetailId(null)}>← Back</button>
+            <Stepper status={detail.status}/>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 310px",gap:16}}>
               <div>
-                <div className="card" style={{padding:24,marginBottom:18}}>
-                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:18}}>
-                    <div><div style={{fontFamily:"monospace",fontSize:11,color:"#4B5268",marginBottom:4}}>{detail.id}</div><h2 style={{fontSize:20,fontWeight:600}}>{detail.toolName}</h2><div style={{fontSize:13,color:"#6B7094",marginTop:2}}>{detail.toolVendor} · {detail.toolCategory}</div></div>
-                    <span className="badge" style={{background:STATUS_CONFIG[detail.status]?.bg,color:STATUS_CONFIG[detail.status]?.color,fontSize:12,padding:"5px 12px"}}><span style={{width:6,height:6,borderRadius:"50%",background:STATUS_CONFIG[detail.status]?.dot}}/>{STATUS_CONFIG[detail.status]?.label}</span>
+                <div className="card" style={{padding:22,marginBottom:14}}>
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:16}}>
+                    <div><h2 style={{fontSize:20,fontWeight:700,color:"#1A1D2E"}}>{detail.toolName}</h2><div style={{fontSize:13,color:"#6B7494",marginTop:2}}>{detail.toolVendor} · {detail.toolCategory} · {detail.department}</div></div>
+                    <span className="badge" style={{background:STATUS_CFG[detail.status]?.bg,color:STATUS_CFG[detail.status]?.color,padding:"5px 12px"}}>{STATUS_CFG[detail.status]?.label}</span>
                   </div>
-                  <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:12,marginBottom:16}}>
-                    {[["Cost",`$${parseFloat(detail.annualCost||0).toLocaleString()} / ${detail.costPeriod||"monthly"}`],["Seats",detail.seats||"—"],["Department",detail.department||"—"],["Category",detail.toolCategory],["Urgency",(detail.urgency||"normal").charAt(0).toUpperCase()+(detail.urgency||"").slice(1)],["Submitted By",detail.submitterName]].map(([k,v])=>(
-                      <div key={k} style={{background:"#1A1D27",padding:"11px 13px",borderRadius:8}}><div style={{fontSize:10,color:"#4B5268",textTransform:"uppercase",letterSpacing:"0.08em",marginBottom:3}}>{k}</div><div style={{fontSize:13,fontWeight:500}}>{v}</div></div>
+                  <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:10,marginBottom:14}}>
+                    {[["Cost",`$${parseFloat(detail.costAmount||0).toLocaleString()} / ${detail.costPeriod}`],["Yearly",`$${yearlyEquiv(detail.costAmount,detail.costPeriod).toLocaleString()}`],["Seats",detail.seats||"—"],["Urgency",(detail.urgency||"normal").toUpperCase()]].map(([k,v])=>(
+                      <div key={k} style={{background:"#F7F8FC",padding:"10px 12px",borderRadius:8}}><div style={{fontSize:10,color:"#A0A8C0",textTransform:"uppercase",marginBottom:2}}>{k}</div><div style={{fontSize:13,fontWeight:600}}>{v}</div></div>
                     ))}
                   </div>
-                  <div style={{background:"#1A1D27",padding:"12px 14px",borderRadius:8,marginBottom:12,display:"flex",gap:20}}>
-                    <div><div style={{fontSize:10,color:"#4B5268",textTransform:"uppercase",letterSpacing:"0.08em",marginBottom:3}}>Manager</div><div style={{fontSize:13,fontWeight:500}}>{detail.managerName}</div><div style={{fontSize:11,color:"#6B7094"}}>{detail.managerEmail}</div></div>
+                  <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:14}}>
+                    <div style={{background:"#F7F8FC",padding:"10px 12px",borderRadius:8}}><div style={{fontSize:10,color:"#A0A8C0",textTransform:"uppercase",marginBottom:3}}>Manager 1</div><div style={{fontWeight:600,fontSize:13}}>{detail.mgr1Name}</div><div style={{fontSize:11,color:"#6B7494"}}>{detail.mgr1Email}</div></div>
+                    <div style={{background:"#F7F8FC",padding:"10px 12px",borderRadius:8}}><div style={{fontSize:10,color:"#A0A8C0",textTransform:"uppercase",marginBottom:3}}>Manager 2</div><div style={{fontWeight:600,fontSize:13}}>{detail.mgr2Name}</div><div style={{fontSize:11,color:"#6B7494"}}>{detail.mgr2Email}</div></div>
                   </div>
-                  {detail.justification&&<div style={{marginBottom:12}}><div className="sec">Justification</div><p style={{fontSize:13,color:"#B0B4CC",lineHeight:1.7}}>{detail.justification}</p></div>}
-                  <div style={{fontSize:11,color:"#4B5268"}}>Submitted {formatDate(detail.submittedAt)} · {detail.submitterEmail}</div>
+                  {detail.justification&&<div><div style={{fontSize:10,color:"#A0A8C0",textTransform:"uppercase",marginBottom:4}}>Justification</div><p style={{fontSize:13,color:"#4B5268",lineHeight:1.7,background:"#F7F8FC",padding:"10px 12px",borderRadius:8}}>{detail.justification}</p></div>}
+                  <div style={{marginTop:12,fontSize:11,color:"#A0A8C0"}}>By {detail.submitterName} · {formatDT(detail.submittedAt)}</div>
                 </div>
-                {detail.alternatives?.filter(a=>a.name).length>0&&(<div className="card" style={{padding:20}}>
-                  <div className="sec">Alternatives</div>
-                  {detail.alternatives.filter(a=>a.name).map((alt,i)=>(<div key={i} className="alt-card"><div style={{display:"flex",justifyContent:"space-between"}}><div><div style={{fontWeight:500,fontSize:13}}>{alt.name}</div>{alt.vendor&&<div style={{fontSize:11,color:"#6B7094"}}>{alt.vendor}</div>}</div>{alt.annualCost&&<div style={{fontFamily:"monospace",fontSize:12,color:"#F59E0B"}}>${parseFloat(alt.annualCost).toLocaleString()}/yr</div>}</div>{alt.notes&&<div style={{fontSize:12,color:"#9CA3C0",marginTop:6}}>{alt.notes}</div>}</div>))}
-                </div>)}
-              </div>
-              <div>
-                {detail.status==="manager-review"&&(
+                {detail.alternatives?.filter(a=>a.name).length>0&&(
                   <div className="card" style={{padding:20,marginBottom:14}}>
-                    <div className="sec">Manager Approval Pending</div>
-                    <p style={{fontSize:12,color:"#6B7094",marginBottom:12,lineHeight:1.6}}>Waiting for <strong style={{color:"#E8EAF0"}}>{detail.managerName}</strong> to approve via email link.</p>
-                    <button className="btn" style={{background:"#6366F1",color:"white",padding:"9px",fontSize:13,width:"100%",marginBottom:8}} onClick={()=>setEmailModal(detail)}>📧 Resend Approval Email</button>
-                    <button className="btn" style={{background:"#1E2130",color:"#F59E0B",padding:"9px",fontSize:13,width:"100%",border:"1px solid #F59E0B30"}} onClick={()=>startEdit(detail)}>✏️ Edit Request</button>
-                    <div style={{fontSize:11,color:"#4B5268",marginTop:6,textAlign:"center"}}>You can edit while awaiting manager approval</div>
+                    <div className="sec-title">Alternatives Considered</div>
+                    {detail.alternatives.filter(a=>a.name).map((alt,i)=>(
+                      <div key={i} className="alt-box"><div style={{display:"flex",justifyContent:"space-between"}}><div><div style={{fontWeight:600,fontSize:13}}>{alt.name}</div>{alt.vendor&&<div style={{fontSize:11,color:"#6B7494"}}>{alt.vendor}</div>}</div>{alt.cost&&<div style={{fontWeight:700,color:"#F59E0B",fontFamily:"monospace"}}>${parseFloat(alt.cost).toLocaleString()}</div>}</div>{alt.notes&&<div style={{fontSize:12,color:"#6B7494",marginTop:6}}>{alt.notes}</div>}</div>
+                    ))}
                   </div>
                 )}
-                {detail.status==="procurement-review"&&(
-                  <div className="card" style={{padding:20,marginBottom:14}}>
-                    <div className="sec">Procurement Decision</div>
-                    <div style={{background:"#1E3A2F",padding:"8px 12px",borderRadius:8,fontSize:12,color:"#10B981",marginBottom:12}}>✓ Manager approved this request</div>
-                    <textarea className="inp" rows={3} placeholder="Add a note…" value={approvalNote} onChange={e=>setApprovalNote(e.target.value)} style={{marginBottom:10,resize:"none"}}/>
-                    <div style={{display:"flex",flexDirection:"column",gap:7}}>
-                      <button className="btn" style={{background:"#10B981",color:"white",padding:9,fontSize:13}} onClick={()=>procurementAction(detail.id,true,approvalNote)}>✓ Final Approve</button>
-                      <button className="btn" style={{background:"#EF4444",color:"white",padding:9,fontSize:13}} onClick={()=>procurementAction(detail.id,false,approvalNote)}>✕ Reject</button>
+              </div>
+              <div>
+                {/* Manager email buttons */}
+                {detail.status==="mgr1-pending"&&<div className="card" style={{padding:18,marginBottom:12}}>
+                  <div className="sec-title">Manager 1 Pending</div>
+                  <p style={{fontSize:12,color:"#6B7494",marginBottom:10}}>Waiting for <strong>{detail.mgr1Name}</strong></p>
+                  <button className="btn" style={{background:"#EEF2FF",color:"#6366F1",padding:"9px",width:"100%",justifyContent:"center"}} onClick={()=>setEmailModal({req:detail,level:1})}>📧 Send/Resend Email</button>
+                </div>}
+                {detail.status==="mgr2-pending"&&<div className="card" style={{padding:18,marginBottom:12}}>
+                  <div className="sec-title">Manager 2 Pending</div>
+                  <p style={{fontSize:12,color:"#6B7494",marginBottom:10}}>Waiting for <strong>{detail.mgr2Name}</strong></p>
+                  <button className="btn" style={{background:"#F5F3FF",color:"#8B5CF6",padding:"9px",width:"100%",justifyContent:"center"}} onClick={()=>setEmailModal({req:detail,level:2})}>📧 Send/Resend Email</button>
+                </div>}
+                {/* Procurement actions */}
+                {canApprove&&detail.status==="procurement-review"&&(
+                  <div className="card" style={{padding:18,marginBottom:12}}>
+                    <div className="sec-title">Procurement Decision</div>
+                    <div style={{background:"#ECFDF5",padding:"8px 12px",borderRadius:7,fontSize:12,color:"#10B981",marginBottom:10}}>✓ Both managers approved</div>
+                    <textarea className="inp" rows={2} placeholder="Note…" value={procNote} onChange={e=>setProcNote(e.target.value)} style={{marginBottom:8,resize:"none"}}/>
+                    <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+                      <button className="btn" style={{background:"#10B981",color:"#fff",padding:"9px",justifyContent:"center"}} onClick={()=>procurementDecide(detail.id,true,procNote)}>✓ Approve</button>
+                      <button className="btn" style={{background:"#EF4444",color:"#fff",padding:"9px",justifyContent:"center"}} onClick={()=>procurementDecide(detail.id,false,procNote)}>✕ Reject</button>
                     </div>
                   </div>
                 )}
-                {(detail.status==="approved"||detail.status==="manager-rejected"||detail.status==="rejected")&&(
-                  <div className="card" style={{padding:20,marginBottom:14}}>
-                    <div className="sec">Final Status</div>
-                    <span className="badge" style={{background:STATUS_CONFIG[detail.status]?.bg,color:STATUS_CONFIG[detail.status]?.color,padding:"8px 14px",fontSize:13}}>
-                      <span style={{width:8,height:8,borderRadius:"50%",background:STATUS_CONFIG[detail.status]?.dot}}/>{STATUS_CONFIG[detail.status]?.label}
-                    </span>
-                    <p style={{fontSize:12,color:"#6B7094",marginTop:10}}>{detail.status==="approved"?"This request has been fully approved.":"This request was rejected and stored for records."}</p>
+                {/* Procurement status message */}
+                {canApprove&&detail.status==="approved"&&(
+                  <div className="card" style={{padding:18,marginBottom:12}}>
+                    <div className="sec-title">Procurement Status</div>
+                    <div style={{display:"flex",flexDirection:"column",gap:7}}>
+                      {PROC_STATUSES.map(ps=>(
+                        <button key={ps.value} className="btn" style={{padding:"9px 12px",background:detail.procurementStatus===ps.value?ps.color+"20":"#F7F8FC",color:detail.procurementStatus===ps.value?ps.color:"#6B7494",border:`1.5px solid ${detail.procurementStatus===ps.value?ps.color:"#E8EBF4"}`,justifyContent:"flex-start"}} onClick={()=>setProcurementStatus(detail.id,ps.value)}>
+                          {detail.procurementStatus===ps.value?"✓ ":""}{ps.label}
+                        </button>
+                      ))}
+                    </div>
                   </div>
                 )}
-                <div className="card" style={{padding:20}}>
-                  <div className="sec">Audit Trail</div>
+                {/* Edit button for rejected */}
+                {detail.status?.includes("rejected")&&(user.role==="employee"||user.role==="admin")&&(
+                  <div className="card" style={{padding:18,marginBottom:12}}>
+                    <div className="sec-title">Request Rejected</div>
+                    <p style={{fontSize:12,color:"#6B7494",marginBottom:10}}>You can edit and resubmit this request.</p>
+                    <button className="btn" style={{background:"#FFFBEB",color:"#F59E0B",padding:"9px",width:"100%",justifyContent:"center",border:"1.5px solid #FDE68A"}} onClick={()=>startEdit(detail)}>✏️ Edit & Resubmit</button>
+                  </div>
+                )}
+                {/* Delete */}
+                {canDelete&&<div className="card" style={{padding:18,marginBottom:12}}>
+                  <div className="sec-title">Admin Actions</div>
+                  <button className="btn" style={{background:"#FEF2F2",color:"#EF4444",padding:"9px",width:"100%",justifyContent:"center",border:"1.5px solid #FECACA"}} onClick={()=>setDeleteConfirm(detail.id)}>🗑 Delete Request</button>
+                </div>}
+                {/* Audit */}
+                <div className="card" style={{padding:18}}>
+                  <div className="sec-title">Audit Log</div>
                   {(detail.auditLog||[]).slice().reverse().map((log,i)=>(
-                    <div key={i} className="audit-item"><div className="audit-dot" style={{background:log.action?.includes("Approved")?"#10B981":log.action?.includes("Rejected")?"#EF4444":log.action==="Submitted"?"#6366F1":"#F59E0B"}}/>
-                    <div style={{flex:1}}><div style={{display:"flex",justifyContent:"space-between"}}><span style={{fontWeight:500,fontSize:13}}>{log.action}</span><span style={{fontSize:10,color:"#4B5268"}}>{formatDate(log.at)}</span></div><div style={{fontSize:11,color:"#6B7094"}}>by {log.by}</div>{log.note&&<div style={{fontSize:11,color:"#9CA3C0",marginTop:3,fontStyle:"italic"}}>"{log.note}"</div>}</div></div>
+                    <div key={i} className="audit-row">
+                      <div style={{width:8,height:8,borderRadius:"50%",marginTop:5,flexShrink:0,background:log.action?.includes("Approved")?"#10B981":log.action?.includes("Rejected")?"#EF4444":log.action?.includes("Edit")?"#F59E0B":"#6366F1"}}/>
+                      <div style={{flex:1}}>
+                        <div style={{display:"flex",justifyContent:"space-between",flexWrap:"wrap",gap:4}}>
+                          <span style={{fontWeight:600,fontSize:12,color:"#1A1D2E"}}>{log.action}</span>
+                          <div style={{fontSize:10,color:"#A0A8C0",textAlign:"right"}}><div>{log.date}</div><div>{log.time}</div></div>
+                        </div>
+                        <div style={{fontSize:11,color:"#6B7494"}}>by {log.by} ({log.role})</div>
+                        {log.note&&<div style={{fontSize:11,color:"#A0A8C0",fontStyle:"italic",marginTop:2}}>"{log.note}"</div>}
+                      </div>
+                    </div>
                   ))}
                 </div>
               </div>
@@ -586,145 +750,236 @@ function App() {
           </div>
         )}
 
-        {/* SUBMIT */}
+        {/* ── SUBMIT FORM ── */}
         {view==="submit"&&(
-          <div style={{maxWidth:720}}>
-            <div style={{marginBottom:24}}>
-              <h1 style={{fontSize:24,fontWeight:600,color:"#F0F2FA"}}>{editId?"✏️ Edit Request":"New Tool Request"}</h1>
-              <p style={{fontSize:13,color:"#6B7094",marginTop:3}}>{editId?"Editing is only allowed before manager approves — all changes are logged.":"After submitting, an approval email will be sent to your manager"}</p>
-              {editId&&<div style={{marginTop:8,padding:"8px 14px",background:"#2A2510",border:"1px solid #F59E0B30",borderRadius:8,fontSize:12,color:"#F59E0B",display:"inline-block"}}>⚠ Editing existing request — changes will be saved to Firebase</div>}
+          <div style={{maxWidth:740}}>
+            <div style={{marginBottom:20}}>
+              <h1 style={{fontSize:22,fontWeight:700,color:"#1A1D2E"}}>{editId?"✏️ Edit & Resubmit":"New Procurement Request"}</h1>
+              <p style={{fontSize:13,color:"#6B7494",marginTop:3}}>{editId?"Update details and resubmit for approval":"Fill in details — request will go to both managers for approval"}</p>
+              {editId&&<div style={{marginTop:8,display:"inline-block",padding:"6px 12px",background:"#FFFBEB",border:"1.5px solid #FDE68A",borderRadius:7,fontSize:12,color:"#F59E0B"}}>⚠ Editing rejected request — will restart approval flow</div>}
             </div>
-            <div className="card" style={{padding:24,marginBottom:16}}>
-              <div className="sec">Your Information</div>
-              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:14}}>
-                <div><label>Full Name *</label><input className="inp" placeholder="Jane Smith" value={form.submitterName} onChange={e=>setForm({...form,submitterName:e.target.value})}/></div>
-                <div><label>Email</label><input className="inp" placeholder="jane@company.com" value={form.submitterEmail} onChange={e=>setForm({...form,submitterEmail:e.target.value})}/></div>
-                <div><label>Department</label><input className="inp" placeholder="e.g. Engineering" value={form.department} onChange={e=>setForm({...form,department:e.target.value})}/></div>
+            {/* Manager Details */}
+            <div className="card" style={{padding:22,marginBottom:14,borderTop:"3px solid #6366F1"}}>
+              <div className="sec-title">👔 Manager Approvers</div>
+              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:14,marginBottom:12}}>
+                <div><label>Manager 1 Name *</label><input className="inp" placeholder="First approver name" value={form.mgr1Name} onChange={e=>setForm({...form,mgr1Name:e.target.value})}/></div>
+                <div><label>Manager 1 Email *</label><input className="inp" placeholder="mgr1@company.com" value={form.mgr1Email} onChange={e=>setForm({...form,mgr1Email:e.target.value})}/></div>
               </div>
-            </div>
-            <div className="card" style={{padding:24,marginBottom:16,border:"1px solid #6366F130"}}>
-              <div className="sec" style={{color:"#6366F1"}}>👤 Manager Details (for approval)</div>
               <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:14}}>
-                <div><label>Manager Name *</label><input className="inp" placeholder="John Doe" value={form.managerName} onChange={e=>setForm({...form,managerName:e.target.value})}/></div>
-                <div><label>Manager Email *</label><input className="inp" placeholder="john@company.com" value={form.managerEmail} onChange={e=>setForm({...form,managerEmail:e.target.value})}/></div>
+                <div><label>Manager 2 Name *</label><input className="inp" placeholder="Second approver name" value={form.mgr2Name} onChange={e=>setForm({...form,mgr2Name:e.target.value})}/></div>
+                <div><label>Manager 2 Email *</label><input className="inp" placeholder="mgr2@company.com" value={form.mgr2Email} onChange={e=>setForm({...form,mgr2Email:e.target.value})}/></div>
               </div>
-              <div style={{marginTop:10,fontSize:12,color:"#6B7094",background:"#1A1D27",padding:"8px 12px",borderRadius:8}}>📧 After you submit, you'll get an email draft to forward to your manager with an approval link.</div>
             </div>
-            <div className="card" style={{padding:24,marginBottom:16}}>
-              <div className="sec">Tool Details</div>
+            {/* Tool Details */}
+            <div className="card" style={{padding:22,marginBottom:14}}>
+              <div className="sec-title">🛠 Tool Details</div>
               <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:14,marginBottom:14}}>
                 <div><label>Tool Name *</label><input className="inp" placeholder="e.g. Figma" value={form.toolName} onChange={e=>setForm({...form,toolName:e.target.value})}/></div>
                 <div><label>Vendor</label><input className="inp" placeholder="e.g. Figma Inc." value={form.toolVendor} onChange={e=>setForm({...form,toolVendor:e.target.value})}/></div>
                 <div><label>Category</label><select className="inp" value={form.toolCategory} onChange={e=>setForm({...form,toolCategory:e.target.value})}>{CATEGORIES.map(c=><option key={c}>{c}</option>)}</select></div>
-                <div><label>Urgency</label><div style={{display:"flex",gap:7}}>{["low","normal","high"].map(u=><button key={u} className="urg-btn" style={form.urgency===u?{background:u==="high"?"#3A1E1E":u==="normal"?"#1E2B3A":"#1E3A2F",color:u==="high"?"#EF4444":u==="normal"?"#6366F1":"#10B981",borderColor:u==="high"?"#EF4444":u==="normal"?"#6366F1":"#10B981"}:{}} onClick={()=>setForm({...form,urgency:u})}>{u.charAt(0).toUpperCase()+u.slice(1)}</button>)}</div></div>
+                <div><label>Department</label><select className="inp" value={form.department} onChange={e=>setForm({...form,department:e.target.value})}>{DEPARTMENTS.map(d=><option key={d}>{d}</option>)}</select></div>
+              </div>
+              {/* Cost with billing toggle */}
+              <div style={{marginBottom:14}}>
+                <label>Cost & Billing Cycle *</label>
+                <div style={{display:"flex",gap:0,marginBottom:8,width:"fit-content"}}>
+                  <button className="billing-tab" style={{borderRadius:"8px 0 0 8px",background:form.costPeriod==="monthly"?"#6366F1":"#fff",color:form.costPeriod==="monthly"?"#fff":"#6B7494",borderRight:"none"}} onClick={()=>setForm({...form,costPeriod:"monthly"})}>Monthly</button>
+                  <button className="billing-tab" style={{borderRadius:"0 8px 8px 0",background:form.costPeriod==="yearly"?"#6366F1":"#fff",color:form.costPeriod==="yearly"?"#fff":"#6B7494"}} onClick={()=>setForm({...form,costPeriod:"yearly"})}>Yearly</button>
+                </div>
+                <input className="inp" type="number" placeholder={`Amount in USD (${form.costPeriod})`} value={form.costAmount} onChange={e=>setForm({...form,costAmount:e.target.value})} style={{maxWidth:280}}/>
+                {form.costAmount&&<div style={{fontSize:12,color:"#6B7494",marginTop:5,padding:"6px 10px",background:"#F7F8FC",borderRadius:6,display:"inline-block"}}>
+                  {form.costPeriod==="monthly"?`Yearly total: $${(parseFloat(form.costAmount)*12).toLocaleString()}`:`Monthly equivalent: $${(parseFloat(form.costAmount)/12).toFixed(0).replace(/\B(?=(\d{3})+(?!\d))/g,",")}`}
+                </div>}
               </div>
               <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:14,marginBottom:14}}>
-                <div>
-                  <label>Cost Amount (USD) *</label>
-                  <div style={{display:"flex",gap:0,marginBottom:6}}>
-                    <button type="button" className="btn" style={{background:form.costPeriod==="monthly"?"#6366F1":"#1A1D27",color:form.costPeriod==="monthly"?"white":"#8B8FA8",padding:"9px 14px",fontSize:12,borderRadius:"8px 0 0 8px",border:"1px solid #2E3347"}} onClick={()=>setForm({...form,costPeriod:"monthly"})}>Monthly</button>
-                    <button type="button" className="btn" style={{background:form.costPeriod==="yearly"?"#6366F1":"#1A1D27",color:form.costPeriod==="yearly"?"white":"#8B8FA8",padding:"9px 14px",fontSize:12,borderRadius:"0 8px 8px 0",border:"1px solid #2E3347",borderLeft:"none"}} onClick={()=>setForm({...form,costPeriod:"yearly"})}>Yearly</button>
-                  </div>
-                  <input className="inp" type="number" placeholder={form.costPeriod==="monthly"?"e.g. 1000 per month":"e.g. 12000 per year"} value={form.annualCost} onChange={e=>setForm({...form,annualCost:e.target.value})}/>
-                  {form.annualCost&&<div style={{fontSize:11,color:"#6B7094",marginTop:4}}>
-                    {form.costPeriod==="monthly"?`= $${(parseFloat(form.annualCost)*12).toLocaleString()} / year`:`= $${(parseFloat(form.annualCost)/12).toFixed(0).toLocaleString()} / month`}
-                  </div>}
-                </div>
                 <div><label>Seats / Licenses</label><input className="inp" type="number" placeholder="e.g. 25" value={form.seats} onChange={e=>setForm({...form,seats:e.target.value})}/></div>
+                <div><label>Urgency</label>
+                  <div style={{display:"flex",gap:7,marginTop:2}}>
+                    {["low","normal","high"].map(u=>(
+                      <button key={u} className="btn" style={{padding:"8px 14px",background:form.urgency===u?(u==="high"?"#FEF2F2":u==="normal"?"#EEF2FF":"#ECFDF5"):"#F7F8FC",color:form.urgency===u?(u==="high"?"#EF4444":u==="normal"?"#6366F1":"#10B981"):"#6B7494",border:`1.5px solid ${form.urgency===u?(u==="high"?"#FECACA":u==="normal"?"#C7D2FE":"#A7F3D0"):"#E8EBF4"}`}} onClick={()=>setForm({...form,urgency:u})}>{u.charAt(0).toUpperCase()+u.slice(1)}</button>
+                    ))}
+                  </div>
+                </div>
               </div>
-              <div><label>Business Justification</label><textarea className="inp" rows={3} placeholder="Explain why this tool is needed…" value={form.justification} onChange={e=>setForm({...form,justification:e.target.value})} style={{resize:"vertical"}}/></div>
+              <div><label>Business Justification</label><textarea className="inp" rows={3} placeholder="Why is this tool needed?" value={form.justification} onChange={e=>setForm({...form,justification:e.target.value})} style={{resize:"vertical"}}/></div>
             </div>
-            <div className="card" style={{padding:24,marginBottom:20}}>
-              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
-                <div className="sec" style={{marginBottom:0}}>Alternative Tools</div>
-                <button className="btn" style={{background:"#1E2130",color:"#9CA3C0",padding:"5px 12px",fontSize:12}} onClick={()=>setForm({...form,alternatives:[...form.alternatives,{name:"",vendor:"",annualCost:"",notes:""}]})}>+ Add</button>
+            {/* Alternatives */}
+            <div className="card" style={{padding:22,marginBottom:18}}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
+                <div className="sec-title" style={{marginBottom:0}}>Alternative Tools</div>
+                <button className="btn" style={{background:"#F7F8FC",color:"#6B7494",padding:"5px 10px",fontSize:12}} onClick={()=>setForm({...form,alternatives:[...form.alternatives,{name:"",vendor:"",cost:"",notes:""}]})}>+ Add</button>
               </div>
               {form.alternatives.map((alt,i)=>(
-                <div key={i} className="alt-card">
-                  <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 120px",gap:10,marginBottom:8}}>
+                <div key={i} className="alt-box">
+                  <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 100px",gap:10,marginBottom:8}}>
                     <div><label>Tool</label><input className="inp" placeholder="e.g. Sketch" value={alt.name} onChange={e=>{const a=[...form.alternatives];a[i].name=e.target.value;setForm({...form,alternatives:a});}}/></div>
                     <div><label>Vendor</label><input className="inp" value={alt.vendor} onChange={e=>{const a=[...form.alternatives];a[i].vendor=e.target.value;setForm({...form,alternatives:a});}}/></div>
-                    <div><label>Cost/yr</label><input className="inp" type="number" placeholder="$" value={alt.annualCost} onChange={e=>{const a=[...form.alternatives];a[i].annualCost=e.target.value;setForm({...form,alternatives:a});}}/></div>
+                    <div><label>Cost</label><input className="inp" type="number" placeholder="$" value={alt.cost} onChange={e=>{const a=[...form.alternatives];a[i].cost=e.target.value;setForm({...form,alternatives:a});}}/></div>
                   </div>
-                  <div style={{display:"flex",gap:10,alignItems:"flex-end"}}>
-                    <div style={{flex:1}}><label>Reason Not Selected</label><input className="inp" placeholder="Why rejected?" value={alt.notes} onChange={e=>{const a=[...form.alternatives];a[i].notes=e.target.value;setForm({...form,alternatives:a});}}/></div>
-                    {form.alternatives.length>1&&<button className="btn" style={{background:"#3A1E1E",color:"#EF4444",padding:"9px 10px",fontSize:12}} onClick={()=>setForm({...form,alternatives:form.alternatives.filter((_,j)=>j!==i)})}>✕</button>}
+                  <div style={{display:"flex",gap:8,alignItems:"flex-end"}}>
+                    <div style={{flex:1}}><label>Reason Not Selected</label><input className="inp" placeholder="Why not chosen?" value={alt.notes} onChange={e=>{const a=[...form.alternatives];a[i].notes=e.target.value;setForm({...form,alternatives:a});}}/></div>
+                    {form.alternatives.length>1&&<button className="btn" style={{background:"#FEF2F2",color:"#EF4444",padding:"9px 10px"}} onClick={()=>setForm({...form,alternatives:form.alternatives.filter((_,j)=>j!==i)})}>✕</button>}
                   </div>
                 </div>
               ))}
             </div>
-            <div style={{display:"flex",gap:10,alignItems:"center"}}>
-              <button className="btn" style={{background:"#6366F1",color:"white",padding:"11px 24px",fontSize:14,display:"flex",alignItems:"center",gap:8,opacity:saving?0.7:1}} onClick={submitForm} disabled={saving}>
-                {saving&&<span className="spinner"/>}{saving?"Saving…":editId?"💾 Save Changes":"Submit & Send to Manager →"}
+            <div style={{display:"flex",gap:10}}>
+              <button className="btn" style={{background:"#6366F1",color:"#fff",padding:"11px 22px",fontSize:14,opacity:saving?0.7:1}} onClick={submitForm} disabled={saving}>
+                {saving&&<span className="spinner"/>}{saving?"Saving…":editId?"💾 Save & Resubmit":"Submit Request →"}
               </button>
-              <button className="btn" style={{background:"#1A1D27",color:"#6B7094",padding:"11px 18px",fontSize:14}} onClick={()=>{setForm(initialForm);setEditId(null);setView("dashboard");}}>Cancel</button>
+              <button className="btn" style={{background:"#F7F8FC",color:"#6B7494",padding:"11px 18px",fontSize:14}} onClick={()=>{setForm(initialForm);setEditId(null);setView("dashboard");}}>Cancel</button>
             </div>
           </div>
         )}
 
-        {/* COMPARE */}
-        {view==="compare"&&(
+        {/* ── BILLING TRACKER ── */}
+        {view==="billing"&&(
           <div>
-            <div style={{marginBottom:24}}><h1 style={{fontSize:24,fontWeight:600,color:"#F0F2FA"}}>Compare Tools</h1></div>
-            {compareList.length<2?(<div className="card" style={{padding:60,textAlign:"center"}}><div style={{fontSize:36,marginBottom:10}}>⚖</div><div style={{fontSize:14,color:"#6B7094"}}>Tick checkboxes on <span style={{color:"#6366F1",cursor:"pointer"}} onClick={()=>setView("dashboard")}>Dashboard</span> to select 2+ tools</div></div>):(
-              <div className="card" style={{overflow:"hidden"}}>
-                <div style={{display:"flex",borderBottom:"1px solid #252836"}}>
-                  <div style={{width:140,flexShrink:0,background:"#0F1117",padding:18}}><div style={{fontSize:10,fontWeight:600,color:"#4B5268",textTransform:"uppercase",letterSpacing:"0.08em"}}>Criteria</div></div>
-                  {compareList.map(s=><div key={s.id} style={{flex:1,padding:18,borderLeft:"1px solid #252836"}}><div style={{fontWeight:600,fontSize:14}}>{s.toolName}</div><div style={{fontSize:11,color:"#6B7094",marginBottom:6}}>{s.toolVendor}</div><span className="badge" style={{background:STATUS_CONFIG[s.status]?.bg,color:STATUS_CONFIG[s.status]?.color}}><span style={{width:5,height:5,borderRadius:"50%",background:STATUS_CONFIG[s.status]?.dot}}/>{STATUS_CONFIG[s.status]?.label}</span></div>)}
-                </div>
-                {[["Annual Cost",s=>`$${parseFloat(s.annualCost||0).toLocaleString()}`],["Seats",s=>s.seats||"—"],["Category",s=>s.toolCategory],["Department",s=>s.department||"—"],["Manager",s=>s.managerName||"—"],["Urgency",s=>(s.urgency||"normal").charAt(0).toUpperCase()+(s.urgency||"").slice(1)],["Submitted By",s=>s.submitterName],["Date",s=>formatDate(s.submittedAt)]].map(([label,fn])=>(
-                  <div key={label} style={{display:"flex",borderBottom:"1px solid #1A1D27"}}>
-                    <div style={{width:140,flexShrink:0,background:"#0F1117",padding:"12px 18px",display:"flex",alignItems:"center"}}><span style={{fontSize:11,fontWeight:600,color:"#4B5268",textTransform:"uppercase",letterSpacing:"0.06em"}}>{label}</span></div>
-                    {compareList.map(s=><div key={s.id} style={{flex:1,padding:"12px 18px",borderLeft:"1px solid #1A1D27",fontSize:13}}>{fn(s)}</div>)}
+            <div style={{marginBottom:20}}><h1 style={{fontSize:22,fontWeight:700,color:"#1A1D2E"}}>💳 Billing Tracker</h1><p style={{fontSize:13,color:"#6B7494",marginTop:2}}>Track monthly and yearly subscription costs by department</p></div>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:14,marginBottom:20}}>
+              <div className="card" style={{padding:20}}>
+                <div className="sec-title">Monthly Subscriptions</div>
+                {subs.filter(s=>s.costPeriod==="monthly"&&s.status==="approved").length===0?<div style={{color:"#A0A8C0",fontSize:13}}>No approved monthly subscriptions</div>:
+                subs.filter(s=>s.costPeriod==="monthly"&&s.status==="approved").map(s=>(
+                  <div key={s.id} style={{display:"flex",justifyContent:"space-between",padding:"10px 0",borderBottom:"1px solid #F0F2F8",alignItems:"center"}}>
+                    <div><div style={{fontWeight:600,fontSize:13}}>{s.toolName}</div><div style={{fontSize:11,color:"#6B7494"}}>{s.department}</div></div>
+                    <div style={{textAlign:"right"}}><div style={{fontWeight:700,fontFamily:"monospace",color:"#6366F1"}}>${parseFloat(s.costAmount||0).toLocaleString()}/mo</div><div style={{fontSize:10,color:"#A0A8C0"}}>${(parseFloat(s.costAmount||0)*12).toLocaleString()}/yr</div></div>
                   </div>
                 ))}
-                <div style={{display:"flex"}}><div style={{width:140,flexShrink:0,background:"#0F1117",padding:18}}><span style={{fontSize:11,fontWeight:600,color:"#4B5268",textTransform:"uppercase",letterSpacing:"0.06em"}}>Justification</span></div>{compareList.map(s=><div key={s.id} style={{flex:1,padding:"14px 18px",borderLeft:"1px solid #252836",fontSize:12,color:"#9CA3C0",lineHeight:1.6}}>{s.justification||"—"}</div>)}</div>
+                <div style={{marginTop:12,padding:"10px 0",borderTop:"2px solid #E8EBF4",display:"flex",justifyContent:"space-between"}}>
+                  <span style={{fontWeight:700,fontSize:13}}>Total / month</span>
+                  <span style={{fontWeight:700,fontFamily:"monospace",color:"#6366F1"}}>${subs.filter(s=>s.costPeriod==="monthly"&&s.status==="approved").reduce((t,s)=>t+parseFloat(s.costAmount||0),0).toLocaleString()}</span>
+                </div>
+              </div>
+              <div className="card" style={{padding:20}}>
+                <div className="sec-title">Yearly Subscriptions</div>
+                {subs.filter(s=>s.costPeriod==="yearly"&&s.status==="approved").length===0?<div style={{color:"#A0A8C0",fontSize:13}}>No approved yearly subscriptions</div>:
+                subs.filter(s=>s.costPeriod==="yearly"&&s.status==="approved").map(s=>(
+                  <div key={s.id} style={{display:"flex",justifyContent:"space-between",padding:"10px 0",borderBottom:"1px solid #F0F2F8",alignItems:"center"}}>
+                    <div><div style={{fontWeight:600,fontSize:13}}>{s.toolName}</div><div style={{fontSize:11,color:"#6B7494"}}>{s.department}</div></div>
+                    <div style={{textAlign:"right"}}><div style={{fontWeight:700,fontFamily:"monospace",color:"#10B981"}}>${parseFloat(s.costAmount||0).toLocaleString()}/yr</div><div style={{fontSize:10,color:"#A0A8C0"}}>${(parseFloat(s.costAmount||0)/12).toFixed(0)}/mo</div></div>
+                  </div>
+                ))}
+                <div style={{marginTop:12,padding:"10px 0",borderTop:"2px solid #E8EBF4",display:"flex",justifyContent:"space-between"}}>
+                  <span style={{fontWeight:700,fontSize:13}}>Total / year</span>
+                  <span style={{fontWeight:700,fontFamily:"monospace",color:"#10B981"}}>${subs.filter(s=>s.costPeriod==="yearly"&&s.status==="approved").reduce((t,s)=>t+parseFloat(s.costAmount||0),0).toLocaleString()}</span>
+                </div>
+              </div>
+            </div>
+            <div className="card" style={{padding:20}}>
+              <div className="sec-title">Spend by Department (Approved Only)</div>
+              {DEPARTMENTS.filter(d=>stats.byDept[d]>0).length===0?<div style={{color:"#A0A8C0",fontSize:13}}>No approved requests yet.</div>:
+              DEPARTMENTS.filter(d=>stats.byDept[d]>0).sort((a,b)=>stats.byDept[b]-stats.byDept[a]).map(dept=>{
+                const val = stats.byDept[dept];
+                const max = Math.max(...Object.values(stats.byDept));
+                return(
+                  <div key={dept} style={{marginBottom:12}}>
+                    <div style={{display:"flex",justifyContent:"space-between",marginBottom:4}}><span style={{fontSize:13,fontWeight:500}}>{dept}</span><span style={{fontFamily:"monospace",fontSize:13,fontWeight:700,color:"#6366F1"}}>${val.toLocaleString()}/yr</span></div>
+                    <div style={{height:6,background:"#F0F2F8",borderRadius:3}}><div style={{height:6,background:"linear-gradient(90deg,#6366F1,#8B5CF6)",borderRadius:3,width:`${(val/max)*100}%`,transition:"width 0.5s"}}></div></div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {/* ── AUDIT LOGS ── */}
+        {view==="audit"&&(
+          <div>
+            <div style={{marginBottom:20}}><h1 style={{fontSize:22,fontWeight:700,color:"#1A1D2E"}}>📋 Audit Logs</h1><p style={{fontSize:13,color:"#6B7494",marginTop:2}}>Every action with date and time — stored permanently</p></div>
+            {subs.length===0?(<div className="card" style={{padding:60,textAlign:"center",color:"#A0A8C0"}}><div style={{fontSize:32,marginBottom:8}}>📋</div>No records yet.</div>):(
+              <div className="card" style={{overflow:"hidden"}}>
+                <table style={{width:"100%",borderCollapse:"collapse"}}>
+                  <thead><tr style={{background:"#F7F8FC"}}>{["Tool","Action","By (Role)","Date","Time","Note"].map((h,i)=><th key={i} style={{padding:"10px 14px",fontSize:10,fontWeight:700,color:"#A0A8C0",textAlign:"left",textTransform:"uppercase",letterSpacing:"0.07em"}}>{h}</th>)}</tr></thead>
+                  <tbody>
+                    {subs.flatMap(s=>(s.auditLog||[]).map(log=>({...log,toolName:s.toolName,dept:s.department}))).sort((a,b)=>new Date(b.at)-new Date(a.at)).map((log,i)=>(
+                      <tr key={i} style={{borderTop:"1px solid #F0F2F8",background:i%2===0?"#fff":"#FAFBFE"}}>
+                        <td style={{padding:"10px 14px"}}><div style={{fontWeight:600,fontSize:13}}>{log.toolName}</div><div style={{fontSize:11,color:"#A0A8C0"}}>{log.dept}</div></td>
+                        <td style={{padding:"10px 14px"}}><span style={{padding:"3px 8px",borderRadius:6,fontSize:11,fontWeight:600,background:log.action?.includes("Approved")?"#ECFDF5":log.action?.includes("Rejected")?"#FEF2F2":log.action?.includes("Edit")?"#FFFBEB":"#EEF2FF",color:log.action?.includes("Approved")?"#10B981":log.action?.includes("Rejected")?"#EF4444":log.action?.includes("Edit")?"#F59E0B":"#6366F1"}}>{log.action}</span></td>
+                        <td style={{padding:"10px 14px",fontSize:12}}><div style={{fontWeight:500}}>{log.by}</div><div style={{fontSize:11,color:"#A0A8C0"}}>{log.role}</div></td>
+                        <td style={{padding:"10px 14px",fontSize:12,color:"#6B7494",whiteSpace:"nowrap"}}>{log.date||formatDT(log.at)?.split(",")[0]}</td>
+                        <td style={{padding:"10px 14px",fontSize:12,color:"#6B7494",whiteSpace:"nowrap"}}>{log.time||formatDT(log.at)?.split(",")[1]}</td>
+                        <td style={{padding:"10px 14px",fontSize:12,color:"#A0A8C0",fontStyle:"italic"}}>{log.note||"—"}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
               </div>
             )}
           </div>
         )}
 
-        {/* AUDIT */}
-        {view==="audit"&&(
+        {/* ── COMPARE ── */}
+        {view==="compare"&&(
           <div>
-            <div style={{marginBottom:24}}><h1 style={{fontSize:24,fontWeight:600,color:"#F0F2FA"}}>Audit Trail</h1><p style={{fontSize:13,color:"#6B7094",marginTop:3}}>Complete history of all decisions — stored permanently</p></div>
-            {submissions.length===0?(<div className="card" style={{padding:60,textAlign:"center",color:"#4B5268"}}><div style={{fontSize:36,marginBottom:12}}>📋</div><div>No records yet.</div></div>):(
-              <div className="card" style={{padding:22}}>
-                {submissions.flatMap(s=>(s.auditLog||[]).map(log=>({...log,toolName:s.toolName,dept:s.department,manager:s.managerName}))).sort((a,b)=>new Date(b.at)-new Date(a.at)).map((log,i)=>(
-                  <div key={i} className="audit-item" style={{alignItems:"flex-start"}}>
-                    <div className="audit-dot" style={{background:log.action?.includes("Approved")?"#10B981":log.action?.includes("Rejected")?"#EF4444":log.action==="Submitted"?"#6366F1":"#F59E0B",marginTop:6}}/>
-                    <div style={{flex:1}}>
-                      <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}><div><span style={{fontWeight:500,fontSize:13}}>{log.action}</span><span style={{fontSize:12,color:"#6B7094",marginLeft:8}}>— {log.toolName}</span><span style={{fontSize:11,color:"#4B5268",marginLeft:6}}>({log.dept})</span></div><span style={{fontSize:11,color:"#4B5268",whiteSpace:"nowrap",marginLeft:12}}>{formatDate(log.at)}</span></div>
-                      <div style={{fontSize:11,color:"#6B7094",marginTop:2}}>by {log.by}{log.manager&&log.by!==log.manager?<span style={{marginLeft:6,color:"#4B5268"}}>· Manager: {log.manager}</span>:null}</div>
-                      {log.note&&<div style={{fontSize:11,color:"#9CA3C0",marginTop:3,fontStyle:"italic"}}>"{log.note}"</div>}
+            <div style={{marginBottom:20}}><h1 style={{fontSize:22,fontWeight:700,color:"#1A1D2E"}}>⚖ Compare Tools</h1></div>
+            {subs.filter(s=>s.id).length<2?(<div className="card" style={{padding:60,textAlign:"center",color:"#A0A8C0"}}><div style={{fontSize:32,marginBottom:8}}>⚖</div>Need at least 2 requests to compare.</div>):(()=>{
+              const [sel, setSel] = useState([]);
+              const compareList  = subs.filter(s=>sel.includes(s.id));
+              return(
+                <div>
+                  <div className="card" style={{padding:16,marginBottom:14}}>
+                    <div style={{fontSize:13,color:"#6B7494",marginBottom:10}}>Select tools to compare:</div>
+                    <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+                      {subs.slice(0,20).map(s=><button key={s.id} className="btn" style={{padding:"6px 12px",background:sel.includes(s.id)?"#EEF2FF":"#F7F8FC",color:sel.includes(s.id)?"#6366F1":"#6B7494",border:`1.5px solid ${sel.includes(s.id)?"#C7D2FE":"#E8EBF4"}`}} onClick={()=>setSel(prev=>prev.includes(s.id)?prev.filter(x=>x!==s.id):[...prev,s.id])}>{s.toolName}</button>)}
                     </div>
                   </div>
-                ))}
-              </div>
-            )}
+                  {compareList.length>=2&&(
+                    <div className="card" style={{overflow:"hidden"}}>
+                      <div style={{display:"flex",borderBottom:"1px solid #E8EBF4"}}>
+                        <div style={{width:130,flexShrink:0,background:"#F7F8FC",padding:16}}><div className="sec-title" style={{marginBottom:0}}>Criteria</div></div>
+                        {compareList.map(s=><div key={s.id} style={{flex:1,padding:16,borderLeft:"1px solid #E8EBF4"}}><div style={{fontWeight:700,fontSize:14}}>{s.toolName}</div><div style={{fontSize:11,color:"#A0A8C0"}}>{s.toolVendor}</div></div>)}
+                      </div>
+                      {[["Cost",s=>`$${parseFloat(s.costAmount||0).toLocaleString()} / ${s.costPeriod}`],["Yearly",s=>`$${yearlyEquiv(s.costAmount,s.costPeriod).toLocaleString()}`],["Dept",s=>s.department],["Category",s=>s.toolCategory],["Seats",s=>s.seats||"—"],["Urgency",s=>s.urgency],["Status",s=>STATUS_CFG[s.status]?.label||"—"],["By",s=>s.submitterName||"—"]].map(([lb,fn])=>(
+                        <div key={lb} style={{display:"flex",borderBottom:"1px solid #F0F2F8"}}>
+                          <div style={{width:130,flexShrink:0,background:"#F7F8FC",padding:"10px 16px",display:"flex",alignItems:"center"}}><span style={{fontSize:11,fontWeight:700,color:"#A0A8C0",textTransform:"uppercase"}}>{lb}</span></div>
+                          {compareList.map(s=><div key={s.id} style={{flex:1,padding:"10px 16px",borderLeft:"1px solid #F0F2F8",fontSize:13}}>{fn(s)}</div>)}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
           </div>
         )}
       </div>
 
       {/* Email Modal */}
-      {emailModal&&<EmailModal request={emailModal} onClose={()=>setEmailModal(null)}/>}
+      {emailModal&&<EmailModal req={emailModal.req} level={emailModal.level} onClose={()=>setEmailModal(null)}/>}
 
-      {toast&&(<div className="toast" style={{background:toast.type==="error"?"#3A1E1E":"#1E3A2F",color:toast.type==="error"?"#EF4444":"#10B981",border:`1px solid ${toast.type==="error"?"#EF444430":"#10B98130"}`}}><span>{toast.type==="error"?"⚠":"✓"}</span>{toast.msg}</div>)}
+      {/* Delete Confirm */}
+      {deleteConfirm&&(
+        <div className="modal-bg" onClick={()=>setDeleteConfirm(null)}>
+          <div className="card" style={{maxWidth:380,width:"100%",padding:28,textAlign:"center"}} onClick={e=>e.stopPropagation()}>
+            <div style={{fontSize:40,marginBottom:12}}>🗑</div>
+            <h3 style={{fontSize:18,fontWeight:700,marginBottom:8}}>Delete Request?</h3>
+            <p style={{fontSize:13,color:"#6B7494",marginBottom:20}}>This action cannot be undone. The request and all its logs will be permanently deleted.</p>
+            <div style={{display:"flex",gap:10,justifyContent:"center"}}>
+              <button className="btn" style={{background:"#EF4444",color:"#fff",padding:"10px 20px"}} onClick={()=>deleteRequest(deleteConfirm)}>Yes, Delete</button>
+              <button className="btn" style={{background:"#F7F8FC",color:"#6B7494",padding:"10px 20px"}} onClick={()=>setDeleteConfirm(null)}>Cancel</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {toast&&(<div className="toast" style={{background:toast.type==="error"?"#FEF2F2":"#ECFDF5",color:toast.type==="error"?"#EF4444":"#10B981",border:`1px solid ${toast.type==="error"?"#FECACA":"#A7F3D0"}`}}><span>{toast.type==="error"?"⚠":"✓"}</span>{toast.msg}</div>)}
     </div>
   );
 }
 
-// ── ROUTER: check if this is a manager approval link ─────────
+// ── ROOT ─────────────────────────────────────────────────────
 function Root() {
+  const [user, setUser] = useState(null);
   const params = new URLSearchParams(window.location.search);
   const docId  = params.get("docId");
-  const action = params.get("action");
-  if (docId && action) return <ManagerApprovalPage docId={docId} action={action}/>;
-  return <App/>;
+  const level  = parseInt(params.get("level")||"1");
+  if (docId) return <ManagerApprovalPage docId={docId} level={level}/>;
+  if (!user)  return <LoginScreen onLogin={setUser}/>;
+  return <App user={user} onLogout={()=>setUser(null)}/>;
 }
 
-const root = ReactDOM.createRoot(document.getElementById('root'));
-root.render(<Root/>);
+ReactDOM.createRoot(document.getElementById('root')).render(<Root/>);
 </script>
 </body>
 </html>
